@@ -71,13 +71,26 @@ NAME_HINTS = {
 }
 SKIP = {"Narva_f"}  # flooded Narva variant: same bounds, usually same level
 
+# Newer/reworked maps ship as game feature PLUGINS with their own content
+# roots (visible at editor startup as "Mounting Project plugin Al_Basrah"
+# etc.), not under /Game/Maps. When a map has candidates under its plugin
+# root, prefer those - anything left under /Game/Maps for it is a legacy
+# leftover (e.g. the pre-rework /Game/Maps/BASRAH_CITY).
+PREFERRED_ROOTS = {
+    "AlBasrah": "/Al_Basrah/",
+    "Harju": "/Harju/",
+    "BlackCoast": "/BlackCoast/",
+    "Sanxian": "/SanxianIslands/",
+}
+
 # Candidate paths containing any of these are gameplay/lighting/dev variants,
 # not the base art level we want to trace. Used as a soft filter: if it
 # eliminates every candidate for a map, the unfiltered list is used instead.
 EXCLUDE_SUBSTRINGS = [
     "/development/", "/gameplay_layers/", "/lighting_layers/",
     "/weatherlayer", "/vfx", "entrymap", "_gpu", "/ll_", "/wl_",
-    "blockout", "_test", "profile",
+    "blockout", "_test", "profile", "/coop/", "/freemissions/",
+    "/automation/", "/sound_layers/", "/sounds/",
 ]
 
 
@@ -88,11 +101,14 @@ def _norm(s):
 def rank_candidate(pkg):
     """Lower is better: folder-named level, then GEO/master/city variants."""
     parts = pkg.split("/")
-    name, folder = parts[-1], parts[3] if len(parts) > 3 else ""
+    name = parts[-1]
     n = _norm(name)
-    if n == _norm(folder):
+    # A level named like any directory on its path (Chora/Chora,
+    # /Al_Basrah/Maps/AlBasrah_Level-ish) is the base level.
+    dir_norms = {_norm(p) for p in parts[1:-1] if p}
+    if n in dir_norms or n.replace("level", "") in dir_norms:
         score = 0
-    elif any(k in n for k in ("geo", "master", "city")):
+    elif any(k in n for k in ("geo", "master", "city", "level")):
         score = 1
     else:
         score = 2
@@ -100,24 +116,29 @@ def rank_candidate(pkg):
 
 
 def find_world_assets():
-    """All World asset package names under /Game/Maps."""
+    """
+    All World asset package names that live in a Maps folder - both the
+    classic /Game/Maps tree and game-feature-plugin roots like
+    /Al_Basrah/Maps, /Harju/Maps, /BlackCoast/Maps, /SanxianIslands/Maps.
+    """
     registry = unreal.AssetRegistryHelpers.get_asset_registry()
     ar_filter = None
     try:  # UE5.1+: class paths
         ar_filter = unreal.ARFilter(
             class_paths=[unreal.TopLevelAssetPath("/Script/Engine", "World")],
-            package_paths=["/Game/Maps"], recursive_paths=True)
+            recursive_paths=True)
     except Exception:
         pass
     if ar_filter is None:
         try:  # older engines: class names
-            ar_filter = unreal.ARFilter(
-                class_names=["World"],
-                package_paths=["/Game/Maps"], recursive_paths=True)
+            ar_filter = unreal.ARFilter(class_names=["World"],
+                                        recursive_paths=True)
         except Exception:
             raise RuntimeError("could not build an ARFilter on this engine")
-    assets = unreal.AssetRegistryHelpers.get_asset_registry().get_assets(ar_filter)
-    return sorted({str(a.package_name) for a in assets})
+    assets = registry.get_assets(ar_filter)
+    worlds = {str(a.package_name) for a in assets}
+    return sorted(w for w in worlds
+                  if "/maps/" in w.lower() and not w.startswith("/Engine"))
 
 
 def main():
@@ -145,6 +166,12 @@ def main():
                     if not any(x in w.lower() for x in EXCLUDE_SUBSTRINGS)]
         if filtered:
             cands = filtered
+        # Reworked maps: prefer the plugin content root over legacy leftovers.
+        preferred_root = PREFERRED_ROOTS.get(name)
+        if preferred_root:
+            in_plugin = [w for w in cands if w.startswith(preferred_root)]
+            if in_plugin:
+                cands = in_plugin
         cands.sort(key=rank_candidate)
         level = cands[0]
         maps.append({
