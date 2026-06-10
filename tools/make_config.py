@@ -6,13 +6,23 @@ It lists all World assets under /Game/Maps via the asset registry, matches
 them against the maps in squadcalc_bounds.json, and writes a ready-to-run
 maps_config.json next to this script.
 
-    py "<path-to-repo>/tools/make_config.py"
+HOW TO RUN (in the editor's Output Log console at the bottom):
 
-Review the output before running the batch: for each map it picks the world
-asset with the shortest name inside the matched folder (the persistent /
-art level), and prints the alternatives so you can swap in a different layer
-if the guess is wrong. Unmatched maps are listed at the end - fill those in
-by hand.
+  Cmd mode (recommended - the dropdown shows "Cmd"):
+      py "<path-to-repo>/tools/make_config.py"
+
+  Python mode (the dropdown shows "Python"):
+      exec(open(r"<path-to-repo>/tools/make_config.py").read())
+
+  Replace <path-to-repo> with the folder you cloned into, e.g.
+      py "C:/tools/SquadHeight/tools/make_config.py"
+
+Review the output before running the batch: for each map it picks the base
+art level (the one named like its folder, then GEO/master variants),
+skipping Development / Gameplay / Lighting layers, and prints the
+alternatives so you can swap one in if a guess is wrong. Maps with no match
+are listed at the end together with the unclaimed /Game/Maps folders, so you
+can add them by hand.
 """
 
 import json
