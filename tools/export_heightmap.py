@@ -117,10 +117,18 @@ CONFIG = {
     "exclude_actor_classes": ["InstancedFoliageActor"],
 
     # Hits on these component classes are skipped and the ray continues
-    # downward (slow path, for foliage that is NOT on an IFA).
+    # downward. Foliage classes cover trees that are NOT on an IFA; the
+    # shape/brush components are invisible collision volumes (map boundary
+    # zones, water blockers, triggers) that block the Visibility channel but
+    # are not real surfaces - on Al Basrah a single kind of BoxComponent
+    # covered 12% of the map before these were excluded.
     "exclude_component_classes": [
         "FoliageInstancedStaticMeshComponent",
         "LandscapeGrassComponent",
+        "BoxComponent",
+        "SphereComponent",
+        "CapsuleComponent",
+        "BrushComponent",
     ],
 
     # Case-insensitive substrings matched against the hit static mesh's full
