@@ -21,7 +21,12 @@ import sys
 
 import unreal
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+try:
+    _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    # exec()'d into a console without __file__ - assume the standard layout
+    # and complain clearly if the bounds file isn't found later.
+    _SCRIPT_DIR = os.getcwd()
 
 # SquadCalc map name -> substring(s) to look for in the SDK package path.
 # SDK folder names don't always match SquadCalc names (e.g. AlBasrah lives
