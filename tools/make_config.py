@@ -61,6 +61,33 @@ NAME_HINTS = {
 }
 SKIP = {"Narva_f"}  # flooded Narva variant: same bounds, usually same level
 
+# Candidate paths containing any of these are gameplay/lighting/dev variants,
+# not the base art level we want to trace. Used as a soft filter: if it
+# eliminates every candidate for a map, the unfiltered list is used instead.
+EXCLUDE_SUBSTRINGS = [
+    "/development/", "/gameplay_layers/", "/lighting_layers/",
+    "/weatherlayer", "/vfx", "entrymap", "_gpu", "/ll_", "/wl_",
+    "blockout", "_test", "profile",
+]
+
+
+def _norm(s):
+    return s.lower().replace("_", "").replace("-", "")
+
+
+def rank_candidate(pkg):
+    """Lower is better: folder-named level, then GEO/master/city variants."""
+    parts = pkg.split("/")
+    name, folder = parts[-1], parts[3] if len(parts) > 3 else ""
+    n = _norm(name)
+    if n == _norm(folder):
+        score = 0
+    elif any(k in n for k in ("geo", "master", "city")):
+        score = 1
+    else:
+        score = 2
+    return (score, len(name), pkg)
+
 
 def find_world_assets():
     """All World asset package names under /Game/Maps."""
@@ -102,9 +129,13 @@ def main():
         if not cands:
             unmatched.append(name)
             continue
-        # Prefer the shortest asset name: layer umaps carry suffixes
-        # (AAS_v1 etc.) while the persistent level is usually plain.
-        cands.sort(key=lambda w: (len(w.rsplit("/", 1)[-1]), w))
+        # Drop dev/gameplay/lighting variants, then prefer the level named
+        # like its folder (the base art level), then GEO/master variants.
+        filtered = [w for w in cands
+                    if not any(x in w.lower() for x in EXCLUDE_SUBSTRINGS)]
+        if filtered:
+            cands = filtered
+        cands.sort(key=rank_candidate)
         level = cands[0]
         maps.append({
             "level": level,
@@ -137,6 +168,12 @@ def main():
     if unmatched:
         unreal.log_warning("[SquadHeight] NOT matched (add by hand): %s"
                            % ", ".join(unmatched))
+        # Help identify them: list map folders no matched level lives in.
+        claimed = {m["level"].split("/")[3] for m in maps}
+        folders = sorted({w.split("/")[3] for w in worlds if len(w.split("/")) > 3}
+                         - claimed)
+        unreal.log("[SquadHeight] unclaimed folders under /Game/Maps: %s"
+                   % ", ".join(folders))
 
 
 if __name__ == "__main__":
