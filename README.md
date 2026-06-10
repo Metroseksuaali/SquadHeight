@@ -49,34 +49,22 @@ Note: SquadCalc currently hardcodes the heightmap size to 500×500
 useful once that line reads the size from the loaded array instead
 (`this.width = this.json.length`).
 
-## Map coverage — SDK limitations
+## Map coverage — where maps live in the SDK
 
-The exporter can only trace maps that exist in the Mod SDK as editable
-levels. OWI does not ship everything there, so some maps cannot be exported
-at all, or only as an outdated version (verified against Squad Editor
-Public Testing v10.5):
+All current maps are exportable, but they live in two different places in
+the Mod SDK (verified on Squad Editor Public Testing v10.5):
 
-| Map | Status in the Mod SDK | Consequence |
-|---|---|---|
-| Al Basrah | Only the **pre-rework** (pre-9.0, UE4-era) version | Not exported — a heightmap of the old layout would be wrong for the current game. SquadCalc's existing UE5 terrain data remains the best available. |
-| Black Coast | Not in the SDK | Not exported |
-| Harju | Not in the SDK | Not exported |
-| Sanxian Islands | Not in the SDK | Not exported |
+* **Classic maps** are under `/Game/Maps/...` as expected.
+* **Newer and reworked maps ship as game-feature plugins** with their own
+  content roots: the Al Basrah rework is `/Al_Basrah/Maps/...`, plus
+  `/Harju/Maps/...`, `/BlackCoast/Maps/...` and `/SanxianIslands/Maps/...`.
+  You can see these mount at editor startup
+  (`Mounting Project plugin Al_Basrah` in the log).
 
-Why calculator sites still have minimaps/heightmaps for these maps: that
-data can be extracted from the game's cooked pak files (textures such as
-the landscape heightmap and minimap export fine). But cooked maps cannot be
-opened in the editor, so there is no way to ray-trace them — extraction
-yields terrain-only heightmaps, i.e. exactly what SquadCalc already uses.
-The structures-included data this project produces requires the editable
-level.
-
-A possible future workaround is a runtime mod: mods run inside the real
-game where these maps exist, so an in-game trace pass could produce full
-heightmaps for them. That is a separate, larger project.
-
-If a future SDK release adds these maps, `tools/make_config.py` will pick
-them up automatically (it warns about unmatched maps).
+Beware of legacy leftovers: `/Game/Maps/BASRAH_CITY` still contains the
+**pre-rework** Al Basrah. Exporting it would produce heightmaps that are
+wrong for the current game. `tools/make_config.py` knows about the plugin
+roots and prefers them automatically.
 
 ## Setup
 

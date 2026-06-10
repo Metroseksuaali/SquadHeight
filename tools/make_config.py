@@ -106,7 +106,9 @@ def rank_candidate(pkg):
     # A level named like any directory on its path (Chora/Chora,
     # /Al_Basrah/Maps/AlBasrah_Level-ish) is the base level.
     dir_norms = {_norm(p) for p in parts[1:-1] if p}
-    if n in dir_norms or n.replace("level", "") in dir_norms:
+    if any(k in n for k in ("coop", "whitebox", "nolandscape", "playtest")):
+        score = 3  # special-purpose master variants, not the base level
+    elif n in dir_norms or n.replace("level", "") in dir_norms:
         score = 0
     elif any(k in n for k in ("geo", "master", "city", "level")):
         score = 1
