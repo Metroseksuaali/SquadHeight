@@ -60,13 +60,94 @@ def _load_level(level_path):
     EditorLoadingAndSavingUtils works in UE4.27, UE5 AND in the pythonscript
     commandlet; LevelEditorSubsystem is tried first on UE5 for good measure.
     """
+    loaded = False
     try:
         les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
         if les and les.load_level(level_path):
-            return True
+            loaded = True
     except (AttributeError, Exception):
         pass
-    return bool(unreal.EditorLoadingAndSavingUtils.load_map(level_path))
+    if not loaded:
+        loaded = bool(unreal.EditorLoadingAndSavingUtils.load_map(level_path))
+    if loaded:
+        _force_load_sublevels()
+    return loaded
+
+
+def _get_world():
+    try:
+        sub = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
+        if sub:
+            world = sub.get_editor_world()
+            if world:
+                return world
+    except (AttributeError, Exception):
+        pass
+    return unreal.EditorLevelLibrary.get_editor_world()
+
+
+def _force_load_sublevels():
+    """
+    Master levels (e.g. /Game/Maps/X/Sublevels/L_000_Master_X) keep their
+    content - landscape included - in streaming sublevels. Opening the map in
+    a commandlet does not necessarily load them, which leaves the world empty
+    for tracing. Flip every streaming level to loaded+visible and flush.
+    """
+    world = _get_world()
+    try:
+        streaming = list(world.get_editor_property("streaming_levels"))
+    except Exception as exc:
+        unreal.log_warning("[SquadHeight] could not read streaming levels: %s" % exc)
+        return
+    if not streaming:
+        return
+
+    def _unloaded():
+        count = 0
+        for sl in streaming:
+            try:
+                if sl.get_loaded_level() is None:
+                    count += 1
+            except Exception:
+                pass
+        return count
+
+    before = _unloaded()
+    if before == 0:
+        unreal.log("[SquadHeight] all %d sublevels already loaded" % len(streaming))
+        return
+    unreal.log("[SquadHeight] %d/%d sublevels not loaded - forcing load..."
+               % (before, len(streaming)))
+
+    for sl in streaming:
+        for prop, value in (("should_be_loaded", True),
+                            ("should_be_visible", True),
+                            ("should_be_visible_in_editor", True)):
+            try:
+                sl.set_editor_property(prop, value)
+            except Exception:
+                pass
+    try:
+        unreal.GameplayStatics.flush_level_streaming(world)
+    except Exception as exc:
+        unreal.log_warning("[SquadHeight] flush_level_streaming failed: %s" % exc)
+
+    after = _unloaded()
+    if after:
+        # Plan B: re-add still-unloaded sublevels as always-loaded levels.
+        for sl in streaming:
+            try:
+                if sl.get_loaded_level() is not None:
+                    continue
+                pkg = str(sl.get_editor_property("world_asset").get_path_name())
+                pkg = pkg.split(".")[0]
+                unreal.EditorLevelUtils.add_level_to_world(
+                    world, pkg, unreal.LevelStreamingAlwaysLoaded)
+            except Exception as exc:
+                unreal.log_warning("[SquadHeight] add_level_to_world: %s" % exc)
+        after = _unloaded()
+
+    unreal.log("[SquadHeight] sublevels still unloaded after forcing: %d" % after)
 
 
 def main():

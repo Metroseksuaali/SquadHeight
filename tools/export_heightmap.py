@@ -82,6 +82,12 @@ CONFIG = {
     # axis-aligned scan. 0.0 = normal axis-aligned grid.
     "grid_rotation_deg": 0.0,
 
+    # Fail fast if the loaded world has no LandscapeProxy. That practically
+    # always means streaming sublevels did not load (common in commandlets),
+    # and tracing an empty world wastes minutes producing garbage. Set False
+    # only for maps that genuinely have no landscape.
+    "require_landscape": True,
+
     # ---- Tracing ------------------------------------------------------
     # Squad's collision setup is custom, so this is deliberately flexible.
     #   "by": "channel"  -> SystemLibrary.line_trace_single (trace channel)
@@ -342,6 +348,13 @@ def compute_bounds(world, cfg):
     (plus margins later) since the user-facing bounds are 2D.
     """
     proxies = _get_all_actors_of_class(world, _landscape_class())
+    if not proxies and cfg.get("require_landscape", True):
+        raise RuntimeError(
+            "No LandscapeProxy in the loaded world. If this map keeps its "
+            "content in streaming sublevels, they did not load (the batch "
+            "runner forces them; check its log). For maps that truly have "
+            "no landscape, set CONFIG['require_landscape'] = False."
+        )
     if not proxies and cfg["bounds_m"] is None:
         raise RuntimeError(
             "No Landscape actors found in this level and no manual "

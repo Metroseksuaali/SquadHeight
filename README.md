@@ -92,14 +92,17 @@ lets you sanity-check the output before the real export.
 
 ## Batch / headless export
 
-1. Copy `tools/maps_config.example.json` to `tools/maps_config.json` and fill
-   in the level package paths (right-click the map asset in the Content
-   Browser → Copy Reference → keep the `/Game/...` part). Bounds for every
-   map are in `squadcalc_bounds.json`.
-2. Edit the paths at the top of `run_batch_export.bat` (editor binary and
-   `.uproject`).
-3. Run it. Maps are exported one by one; failures don't stop the batch and
-   everything is summarized in `output/batch_report.json`.
+1. Generate `tools/maps_config.json` by running `tools/make_config.py` in the
+   editor's Python console (Cmd mode: `py ".../tools/make_config.py"`) — it
+   scans the SDK's map assets and pairs them with the SquadCalc bounds.
+   Review its picks, or copy `tools/maps_config.example.json` and fill in
+   levels by hand.
+2. Copy `settings.example.bat` to `settings.bat` and edit the paths (editor
+   binary and `.uproject`). `settings.bat` stays out of the repo.
+3. Run `run_batch_export.bat`. Maps are exported one by one; failures don't
+   stop the batch and everything is summarized in `output/batch_report.json`.
+   Master levels that keep their content in streaming sublevels are handled
+   automatically (the runner force-loads all sublevels before tracing).
 
 You can also run `py ".../tools/batch_export.py"` inside an open editor to
 batch without going headless (useful if level streaming misbehaves in

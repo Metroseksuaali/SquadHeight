@@ -8,5 +8,11 @@ heightmap_*_example.json
 __pycache__/
 *.pyc
 
+# machine-specific paths
+settings.bat
+
+# generated per SDK version - regenerate with tools/make_config.py
+tools/maps_config.json
+
 # local tool state
 .claude/
