@@ -91,30 +91,47 @@ def _landscape_count(world):
     return len(unreal.GameplayStatics.get_all_actors_of_class(world, cls))
 
 
+# Sublevels that are NOT part of the static world geometry. Gameplay layers
+# would add vehicles/deployables; the rest are lighting/audio/dev variants.
+_SUBLEVEL_SKIP = (
+    "/gameplay_layer", "/lighting_layer", "/coop/", "/sound", "/audio",
+    "/development/", "/automation/", "_gpu", "/weatherlayer", "/wl_",
+    "/ll_", "flythrough",
+)
+
+
 def _find_sublevel_worlds(level_path):
     """
-    World assets in the map's Sublevels/Levels folders, via the asset
-    registry. Works even when UWorld.streaming_levels is not exposed to
-    Python (e.g. Squad's UE 5.7 build).
+    World assets that belong to the map, via the asset registry. Works even
+    when UWorld.streaming_levels is not exposed to Python (e.g. Squad's
+    UE 5.7 build). Scans the whole map folder because some maps keep their
+    landscape at the folder root (Belaya's 'BelayaLandscape') rather than
+    under Sublevels/.
     """
     if "/Sublevels/" in level_path:
         base = level_path.rsplit("/Sublevels/", 1)[0]
     else:
         base = level_path.rsplit("/", 1)[0]
-    roots = [base + "/Sublevels", base + "/Levels"]
 
     registry = unreal.AssetRegistryHelpers.get_asset_registry()
     try:
         ar_filter = unreal.ARFilter(
             class_paths=[unreal.TopLevelAssetPath("/Script/Engine", "World")],
-            package_paths=roots, recursive_paths=True)
+            package_paths=[base], recursive_paths=True)
     except Exception:
         ar_filter = unreal.ARFilter(class_names=["World"],
-                                    package_paths=roots, recursive_paths=True)
+                                    package_paths=[base], recursive_paths=True)
     worlds = sorted({str(a.package_name) for a in registry.get_assets(ar_filter)})
-    # Don't re-add master variants (the loaded map itself / its siblings).
-    return [w for w in worlds
-            if not w.rsplit("/", 1)[-1].lower().startswith("l_000_master")]
+
+    def wanted(w):
+        if w == level_path:
+            return False  # the map we just loaded
+        name = w.rsplit("/", 1)[-1].lower()
+        if name.startswith("l_000_master"):
+            return False  # sibling master variants
+        return not any(k in w.lower() for k in _SUBLEVEL_SKIP)
+
+    return [w for w in worlds if wanted(w)]
 
 
 def _force_load_sublevels(level_path):
