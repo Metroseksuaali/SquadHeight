@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "Copy this file to maps_config.json and edit. 'level' is the UE package",
+    "path of the persistent level (find it in the Content Browser: right",
+    "click the map asset -> Copy Reference, keep only the /Game/... part",
+    "without the trailing .AssetName).",
+    "'name' overrides the output subfolder (defaults to the world name).",
+    "'output_root' empty = <repo>/output.",
+    "'defaults' and per-map 'overrides' accept any key from CONFIG in",
+    "export_heightmap.py, e.g. resolution_m, surface_mode, bounds_m,",
+    "trace: {channel: ...}, exclude_asset_path_keywords, downsample_to."
+  ],
+  "_bounds_note": [
+    "ALWAYS set bounds_m from tools/squadcalc_bounds.json (the SDK minimap",
+    "corners SquadCalc uses) so the heightmap lines up with the minimap.",
+    "downsample_to: 500 additionally writes the drop-in 500x500 file that",
+    "current SquadCalc expects (it hardcodes width=500)."
+  ],
+  "output_root": "",
+  "defaults": {
+    "resolution_m": 1.0,
+    "surface_mode": "topmost",
+    "downsample_to": 500,
+    "trace_top_margin_m": 500.0
+  },
+  "maps": [
+    {
+      "level": "/Game/Maps/Chora/Chora",
+      "name": "chora",
+      "overrides": {
+        "bounds_m": { "min_x": -2464, "max_x": 1600, "min_y": -2664, "max_y": 1400 }
+      }
+    },
+    {
+      "level": "/Game/Maps/Gorodok/Gorodok",
+      "name": "gorodok",
+      "overrides": {
+        "bounds_m": { "min_x": -2032, "max_x": 2032, "min_y": -2032, "max_y": 2032 }
+      }
+    },
+    {
+      "level": "/Game/Maps/Narva/Narva",
+      "name": "narva",
+      "overrides": {
+        "bounds_m": { "min_x": -1390, "max_x": 1410, "min_y": -1402, "max_y": 1398 }
+      }
+    }
+  ]
+}
