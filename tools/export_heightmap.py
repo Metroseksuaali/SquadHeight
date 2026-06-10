@@ -474,6 +474,30 @@ class _Tracer(object):
         # stats
         self.foliage_skips = 0
         self.overhang_drops = 0
+        # Histogram of which mesh assets the chosen structure hits landed on.
+        # This is how you find foliage that slips through the filters: leaked
+        # tree canopies show up at the top of this list in meta.json, and
+        # their asset paths tell you what to add to
+        # exclude_asset_path_keywords. Costs almost nothing (cached lookups).
+        self.mesh_counts = {}
+        self._comp_path_cache = {}
+
+    def _count_hit_asset(self, component):
+        key = id(component)
+        path = self._comp_path_cache.get(key)
+        if path is None:
+            path = "<unknown>"
+            try:
+                if isinstance(component, unreal.StaticMeshComponent):
+                    mesh = component.static_mesh
+                    if mesh is not None:
+                        path = mesh.get_path_name()
+                elif component is not None:
+                    path = "<%s>" % component.get_class().get_name()
+            except Exception:
+                pass
+            self._comp_path_cache[key] = path
+        self.mesh_counts[path] = self.mesh_counts.get(path, 0) + 1
 
     def _trace_once(self, x, y, z_start):
         start = unreal.Vector(x, y, z_start)
@@ -525,6 +549,8 @@ class _Tracer(object):
                     if is_ls:
                         landscape_z = z
                         break  # nothing of interest below the heightfield
+                    if len(surfaces) == 1:
+                        self._count_hit_asset(component)
                     if self.topmost_mode:
                         break  # first valid hit wins; skip the rest
                 elif is_ls:
@@ -872,6 +898,14 @@ def run_export(output_dir=None, map_name=None, overrides=None):
             "overhang_drops": tracer.overhang_drops,
             "ignored_foliage_actors": len(ignore_actors),
         },
+        # Top mesh assets by cells - check this when verifying foliage
+        # exclusion: leaked tree canopies dominate the list and their paths
+        # show what to add to exclude_asset_path_keywords.
+        "hit_assets_top": [
+            {"cells": n, "asset": p}
+            for p, n in sorted(tracer.mesh_counts.items(),
+                               key=lambda kv: -kv[1])[:40]
+        ],
     }
     with open(os.path.join(map_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
