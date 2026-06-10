@@ -134,29 +134,59 @@ def _find_sublevel_worlds(level_path):
     return [w for w in worlds if wanted(w)]
 
 
+# Sublevels matching these are world geometry that MUST be present for the
+# heightmap (towns in <Map>/Levels/, art layers, landscape chunks, vistas).
+_GEOMETRY_HINTS = (
+    "/070_landscape", "/060_art", "/art_layers/", "/080_vista",
+    "/levels/", "landscape", "_geo", "_art",
+)
+
+
 def _force_load_sublevels(level_path):
     """
-    Master levels (e.g. /Game/Maps/X/Sublevels/L_000_Master_X) keep their
-    content - landscape included - in streaming sublevels, and commandlets do
-    not necessarily load them. The clean route (UWorld.streaming_levels) is
-    not script-exposed in every build, so when the world looks empty (no
-    LandscapeProxy) the sublevels are discovered via the asset registry and
-    attached with EditorLevelUtils.add_level_to_world as always-loaded.
+    Map content can live in streaming sublevels that commandlets do not load:
+    towns in <Map>/Levels/ (Black Coast), Art_Layers (Manicouagan), 070_
+    Landscape chunks under a master, or a root-level landscape (Belaya).
+    UWorld.streaming_levels is not script-exposed in Squad's UE 5.7 build,
+    so the sublevels are discovered via the asset registry, compared against
+    the levels actually loaded, and the missing ones are attached with
+    EditorLevelUtils.add_level_to_world as always-loaded.
     """
     world = _get_world()
-    if _landscape_count(world) > 0:
-        return  # content is loaded; nothing to do
-
     subs = _find_sublevel_worlds(level_path)
     if not subs:
-        unreal.log_warning("[SquadHeight] no landscape AND no sublevel worlds "
-                           "found next to %s" % level_path)
+        if _landscape_count(world) == 0:
+            unreal.log_warning("[SquadHeight] no landscape AND no sublevel "
+                               "worlds found next to %s" % level_path)
         return
 
-    unreal.log("[SquadHeight] no landscape after load - attaching %d sublevels "
-               "from the asset registry..." % len(subs))
+    loaded_pkgs = set()
+    loaded_known = False
+    try:
+        for lvl in unreal.EditorLevelUtils.get_levels(world):
+            loaded_pkgs.add(str(lvl.get_path_name()).split(".")[0])
+        loaded_known = True
+    except Exception as exc:
+        unreal.log_warning("[SquadHeight] could not list loaded levels: %s" % exc)
+
+    missing = [w for w in subs if w not in loaded_pkgs]
+    if _landscape_count(world) == 0:
+        # Empty world: bring in everything that isn't a known variant level.
+        to_add = missing
+    elif loaded_known:
+        # World has content: top up only clearly geometry-bearing levels
+        # that the map did not load by itself.
+        to_add = [w for w in missing
+                  if any(h in w.lower() for h in _GEOMETRY_HINTS)]
+    else:
+        to_add = []  # can't tell what's loaded; don't risk duplicates
+
+    if not to_add:
+        return
+    unreal.log("[SquadHeight] attaching %d missing sublevels (of %d found)..."
+               % (len(to_add), len(subs)))
     added = 0
-    for pkg in subs:
+    for pkg in to_add:
         try:
             unreal.EditorLevelUtils.add_level_to_world(
                 world, pkg, unreal.LevelStreamingAlwaysLoaded)
@@ -168,8 +198,8 @@ def _force_load_sublevels(level_path):
         unreal.GameplayStatics.flush_level_streaming(world)
     except Exception:
         pass
-    unreal.log("[SquadHeight] attached %d/%d sublevels; landscape proxies now: %d"
-               % (added, len(subs), _landscape_count(world)))
+    unreal.log("[SquadHeight] attached %d/%d; landscape proxies now: %d"
+               % (added, len(to_add), _landscape_count(world)))
 
 
 def main():
