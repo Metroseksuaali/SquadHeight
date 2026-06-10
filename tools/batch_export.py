@@ -70,7 +70,7 @@ def _load_level(level_path):
     if not loaded:
         loaded = bool(unreal.EditorLoadingAndSavingUtils.load_map(level_path))
     if loaded:
-        _force_load_sublevels()
+        _force_load_sublevels(level_path)
     return loaded
 
 
@@ -86,68 +86,73 @@ def _get_world():
     return unreal.EditorLevelLibrary.get_editor_world()
 
 
-def _force_load_sublevels():
+def _landscape_count(world):
+    cls = getattr(unreal, "LandscapeProxy", None) or getattr(unreal, "Landscape")
+    return len(unreal.GameplayStatics.get_all_actors_of_class(world, cls))
+
+
+def _find_sublevel_worlds(level_path):
+    """
+    World assets in the map's Sublevels/Levels folders, via the asset
+    registry. Works even when UWorld.streaming_levels is not exposed to
+    Python (e.g. Squad's UE 5.7 build).
+    """
+    if "/Sublevels/" in level_path:
+        base = level_path.rsplit("/Sublevels/", 1)[0]
+    else:
+        base = level_path.rsplit("/", 1)[0]
+    roots = [base + "/Sublevels", base + "/Levels"]
+
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    try:
+        ar_filter = unreal.ARFilter(
+            class_paths=[unreal.TopLevelAssetPath("/Script/Engine", "World")],
+            package_paths=roots, recursive_paths=True)
+    except Exception:
+        ar_filter = unreal.ARFilter(class_names=["World"],
+                                    package_paths=roots, recursive_paths=True)
+    worlds = sorted({str(a.package_name) for a in registry.get_assets(ar_filter)})
+    # Don't re-add master variants (the loaded map itself / its siblings).
+    return [w for w in worlds
+            if not w.rsplit("/", 1)[-1].lower().startswith("l_000_master")]
+
+
+def _force_load_sublevels(level_path):
     """
     Master levels (e.g. /Game/Maps/X/Sublevels/L_000_Master_X) keep their
-    content - landscape included - in streaming sublevels. Opening the map in
-    a commandlet does not necessarily load them, which leaves the world empty
-    for tracing. Flip every streaming level to loaded+visible and flush.
+    content - landscape included - in streaming sublevels, and commandlets do
+    not necessarily load them. The clean route (UWorld.streaming_levels) is
+    not script-exposed in every build, so when the world looks empty (no
+    LandscapeProxy) the sublevels are discovered via the asset registry and
+    attached with EditorLevelUtils.add_level_to_world as always-loaded.
     """
     world = _get_world()
-    try:
-        streaming = list(world.get_editor_property("streaming_levels"))
-    except Exception as exc:
-        unreal.log_warning("[SquadHeight] could not read streaming levels: %s" % exc)
-        return
-    if not streaming:
+    if _landscape_count(world) > 0:
+        return  # content is loaded; nothing to do
+
+    subs = _find_sublevel_worlds(level_path)
+    if not subs:
+        unreal.log_warning("[SquadHeight] no landscape AND no sublevel worlds "
+                           "found next to %s" % level_path)
         return
 
-    def _unloaded():
-        count = 0
-        for sl in streaming:
-            try:
-                if sl.get_loaded_level() is None:
-                    count += 1
-            except Exception:
-                pass
-        return count
-
-    before = _unloaded()
-    if before == 0:
-        unreal.log("[SquadHeight] all %d sublevels already loaded" % len(streaming))
-        return
-    unreal.log("[SquadHeight] %d/%d sublevels not loaded - forcing load..."
-               % (before, len(streaming)))
-
-    for sl in streaming:
-        for prop, value in (("should_be_loaded", True),
-                            ("should_be_visible", True),
-                            ("should_be_visible_in_editor", True)):
-            try:
-                sl.set_editor_property(prop, value)
-            except Exception:
-                pass
+    unreal.log("[SquadHeight] no landscape after load - attaching %d sublevels "
+               "from the asset registry..." % len(subs))
+    added = 0
+    for pkg in subs:
+        try:
+            unreal.EditorLevelUtils.add_level_to_world(
+                world, pkg, unreal.LevelStreamingAlwaysLoaded)
+            added += 1
+        except Exception as exc:
+            unreal.log_warning("[SquadHeight] add_level_to_world(%s): %s"
+                               % (pkg, exc))
     try:
         unreal.GameplayStatics.flush_level_streaming(world)
-    except Exception as exc:
-        unreal.log_warning("[SquadHeight] flush_level_streaming failed: %s" % exc)
-
-    after = _unloaded()
-    if after:
-        # Plan B: re-add still-unloaded sublevels as always-loaded levels.
-        for sl in streaming:
-            try:
-                if sl.get_loaded_level() is not None:
-                    continue
-                pkg = str(sl.get_editor_property("world_asset").get_path_name())
-                pkg = pkg.split(".")[0]
-                unreal.EditorLevelUtils.add_level_to_world(
-                    world, pkg, unreal.LevelStreamingAlwaysLoaded)
-            except Exception as exc:
-                unreal.log_warning("[SquadHeight] add_level_to_world: %s" % exc)
-        after = _unloaded()
-
-    unreal.log("[SquadHeight] sublevels still unloaded after forcing: %d" % after)
+    except Exception:
+        pass
+    unreal.log("[SquadHeight] attached %d/%d sublevels; landscape proxies now: %d"
+               % (added, len(subs), _landscape_count(world)))
 
 
 def main():
@@ -183,6 +188,16 @@ def main():
             else:
                 overrides[k] = v
 
+        # Resume support: skip maps that already have a finished export
+        # (delete the map's output folder, or set SQUADHEIGHT_FORCE=1, to redo).
+        done_marker = os.path.join(output_root, name or level.rsplit("/", 1)[-1],
+                                   "meta.json")
+        if os.path.isfile(done_marker) and not os.environ.get("SQUADHEIGHT_FORCE"):
+            unreal.log("[SquadHeight] ===== [%d/%d] %s — already exported, "
+                       "skipping =====" % (i + 1, len(maps), level))
+            report.append({"level": level, "status": "skipped", "seconds": 0})
+            continue
+
         unreal.log("[SquadHeight] ===== [%d/%d] %s =====" % (i + 1, len(maps), level))
         t_map = time.time()
         try:
@@ -207,13 +222,13 @@ def main():
             # Keep going - one broken map should not kill the whole batch.
 
     # Summary + machine-readable report for CI-style usage.
-    ok = sum(1 for r in report if r["status"] == "ok")
+    ok = sum(1 for r in report if r["status"] in ("ok", "skipped"))
     unreal.log("[SquadHeight] Batch finished: %d/%d ok in %.0f s"
                % (ok, len(report), time.time() - t_batch))
     for r in report:
         line = "[SquadHeight]   %-8s %s (%.0fs)" % (
             r["status"].upper(), r["level"], r["seconds"])
-        (unreal.log if r["status"] == "ok" else unreal.log_error)(line)
+        (unreal.log if r["status"] != "failed" else unreal.log_error)(line)
 
     if not os.path.isdir(output_root):
         os.makedirs(output_root)
