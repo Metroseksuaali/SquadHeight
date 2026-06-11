@@ -1,0 +1,15 @@
+services:
+  squadcalc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: squadcalc-local
+    container_name: squadcalc-local
+    ports:
+      - "8080:8080"
+    volumes:
+      # Our exported heightmaps, staged by stage_heightmaps.py into
+      # ./heightmaps/img/maps/<map>/heightmap.json . Read-only, no rebuild
+      # needed to refresh them.
+      - ./heightmaps:/heightmaps:ro
+    restart: unless-stopped

@@ -13,6 +13,28 @@ after a map update is a single script run.
 Verified working against the Squad SDK (UE5). A full 4 km map at 1 m
 resolution takes about 6 minutes (~45k traces/s).
 
+## Read first — what the values mean at the edges
+
+The scan covers the exact square SquadCalc stretches its heightmap over. A few
+things follow from that, and matter when judging a map:
+
+* **Water and out-of-play ground read as the map minimum (`0` after
+  normalization).** This is correct: a flat sea surface is the right value for
+  mortar math, and the lowest ground sits at 0 by definition.
+* **Where the SDK map's landscape does not fill the whole minimap square, the
+  uncovered border is `0`.** The *playable area is accurate*; only the
+  out-of-play border lacks data. This is most visible on **Chora**, whose
+  landscape is not square and leaves zero-filled bands outside the valley. We
+  deliberately do **not** invent terrain there — extending the nearest edge
+  would fabricate false plateaus (e.g. smear Chora's 150 m valley walls
+  outward), which is worse than a flat minimum. If you already have full-square
+  border data for such a map, prefer yours there and take ours for the
+  playable interior, where the relief is truer (we measure real heights; the
+  current data is often vertically compressed — e.g. Chora 150 m vs 32 m).
+* **Heights are truer than the old Landscape data, including peaks.** Where the
+  current heightmaps clip tall terrain to their maximum, ours keeps the real
+  value (e.g. Skorpo peaks to ~1064 m, not ~557 m).
+
 ## Layout
 
 ```

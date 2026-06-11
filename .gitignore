@@ -1,6 +1,14 @@
 # exporter output (large, regenerated per machine)
 output/
 
+# local SquadCalc test harness: cloned upstream app + staged heightmap data.
+# Keep the small config (Dockerfile, nginx.conf, compose, scripts) tracked.
+squadcalc-test/SquadCalc/
+squadcalc-test/heightmaps/
+squadcalc-test/dist/
+squadcalc-test/*_compare.png
+squadcalc-test/__pycache__/
+
 # legacy SquadCalc heightmaps used for local validation
 heightmap_*_example.json
 
