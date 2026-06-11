@@ -13,6 +13,56 @@ after a map update is a single script run.
 Verified working against the Squad SDK (UE5). A full 4 km map at 1 m
 resolution takes about 6 minutes (~45k traces/s).
 
+## Quick start — export every map (step by step)
+
+This is the headless route: it exports all configured maps to `output/`
+without you babysitting the editor. Do this once per SDK/map update.
+
+1. **Enable Python in the SDK editor.** Edit → Plugins → search "Python" →
+   enable **Python Editor Script Plugin** → restart the editor. (Details and
+   fallbacks under [Setup](#setup).)
+
+2. **Tell the tool where your editor and project are.** Copy
+   `settings.example.bat` to `settings.bat` and edit the two paths inside —
+   the `UnrealEditor-Cmd.exe` for your SDK and your `SquadGame.uproject`.
+   `settings.bat` is git-ignored, so your paths stay local.
+
+3. **Generate the map list.** In the editor's Output Log, switch the input
+   box from `Cmd` to `Python` and run
+   `make_config.py` (see [Batch / headless export](#batch--headless-export)
+   for the exact line). It scans the SDK and writes
+   `tools/maps_config.json`, pairing each map with its SquadCalc bounds.
+   Skim the file to check the picks.
+
+4. **Run the export.** Double-click `run_batch_export.bat` (or run it from a
+   terminal). It launches the editor headless and exports every map in the
+   config. If the editor runs out of memory on a big map it relaunches and
+   resumes — finished maps are skipped — so just let it run to the end.
+
+5. **Collect the results.** Each map lands in `output/<MapName>/`
+   (`heightmap.json` full-res, `heightmap_500.json` drop-in, `heightmap.png`,
+   `meta.json`). A final `output/batch_report.json` lists every map with OK /
+   failed and timing.
+
+6. **Check it before shipping (optional).** `squadcalc-test/` runs a local
+   copy of SquadCalc against these files so you can see the elevation on the
+   real maps — see [squadcalc-test/README.md](squadcalc-test/README.md).
+
+### What you'll see while it runs
+
+Progress is printed live — you are never left guessing:
+
+* **Per map:** a header `===== [3/26] Chora =====` as each one starts, and its
+  duration when it finishes.
+* **Within a map** (the scan takes minutes at 1 m): a line every 25 rows, e.g.
+  `row 1200/4065  (46000 traces/s, ETA 4m02s)` — current row, trace rate and
+  estimated time left.
+* **At the end:** `Batch finished: 24/26 ok in 446 s` plus a per-map summary.
+
+In the headless `.bat` these stream in the console window (and into the
+project's `Saved/Logs`). If you instead run a single map from inside the open
+editor, you also get a graphical progress bar with a **Cancel** button.
+
 ## Read first — what the values mean at the edges
 
 The scan covers the exact square SquadCalc stretches its heightmap over. A few
