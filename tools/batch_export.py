@@ -92,11 +92,13 @@ def _landscape_count(world):
 
 
 # Sublevels that are NOT part of the static world geometry. Gameplay layers
-# would add vehicles/deployables; the rest are lighting/audio/dev variants.
+# would add vehicles/deployables; whitebox/old levels are superseded
+# blockouts; the rest are lighting/audio/dev variants.
 _SUBLEVEL_SKIP = (
     "/gameplay_layer", "/lighting_layer", "/coop/", "/sound", "/audio",
     "/development/", "/automation/", "_gpu", "/weatherlayer", "/wl_",
-    "/ll_", "flythrough",
+    "/ll_", "flythrough", "whitebox", "blockout", "old_delete", "/old",
+    "wip", "playtest", "deprecated", "/050_cameras",
 )
 
 
@@ -134,14 +136,6 @@ def _find_sublevel_worlds(level_path):
     return [w for w in worlds if wanted(w)]
 
 
-# Sublevels matching these are world geometry that MUST be present for the
-# heightmap (towns in <Map>/Levels/, art layers, landscape chunks, vistas).
-_GEOMETRY_HINTS = (
-    "/070_landscape", "/060_art", "/art_layers/", "/080_vista",
-    "/levels/", "landscape", "_geo", "_art",
-)
-
-
 def _force_load_sublevels(level_path):
     """
     Map content can live in streaming sublevels that commandlets do not load:
@@ -170,14 +164,11 @@ def _force_load_sublevels(level_path):
         unreal.log_warning("[SquadHeight] could not list loaded levels: %s" % exc)
 
     missing = [w for w in subs if w not in loaded_pkgs]
-    if _landscape_count(world) == 0:
-        # Empty world: bring in everything that isn't a known variant level.
+    if _landscape_count(world) == 0 or loaded_known:
+        # Attach every missing non-variant level. Whitelisting "geometry-ish"
+        # names was tried first and silently lost Mutaha's and Narva's
+        # building levels - blacklist (in _SUBLEVEL_SKIP) is the safer side.
         to_add = missing
-    elif loaded_known:
-        # World has content: top up only clearly geometry-bearing levels
-        # that the map did not load by itself.
-        to_add = [w for w in missing
-                  if any(h in w.lower() for h in _GEOMETRY_HINTS)]
     else:
         to_add = []  # can't tell what's loaded; don't risk duplicates
 
