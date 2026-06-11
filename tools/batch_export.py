@@ -71,6 +71,7 @@ def _load_level(level_path):
         loaded = bool(unreal.EditorLoadingAndSavingUtils.load_map(level_path))
     if loaded:
         _force_load_sublevels(level_path)
+        _ensure_levels_visible(level_path)
     return loaded
 
 
@@ -191,6 +192,52 @@ def _force_load_sublevels(level_path):
         pass
     unreal.log("[SquadHeight] attached %d/%d; landscape proxies now: %d"
                % (added, len(to_add), _landscape_count(world)))
+
+
+def _ensure_levels_visible(level_path):
+    """
+    Hidden editor levels have NO collision: some masters (Mutaha, Narva)
+    load their sublevels but keep them hidden, which leaves a scan with
+    landscape-only hits. Force every loaded non-variant level visible.
+    """
+    world = _get_world()
+    try:
+        levels = list(unreal.EditorLevelUtils.get_levels(world))
+    except Exception as exc:
+        unreal.log_warning("[SquadHeight] get_levels failed: %s" % exc)
+        return
+    targets = []
+    for lvl in levels:
+        pkg = str(lvl.get_path_name()).split(".")[0]
+        name = pkg.rsplit("/", 1)[-1].lower()
+        if pkg == level_path or name.startswith("l_000_master"):
+            continue
+        if any(k in pkg.lower() for k in _SUBLEVEL_SKIP):
+            continue  # whitebox/old/lighting variants stay hidden
+        targets.append(lvl)
+    if not targets:
+        return
+    unreal.log("[SquadHeight] forcing %d loaded sublevels visible "
+               "(hidden levels have no collision)..." % len(targets))
+    flags = [True] * len(targets)
+    done = False
+    for mode_name in ("DONT_MODIFY_DIRTY_FLAG", "MODIFY_ON_CHANGE"):
+        mode = getattr(unreal.LevelVisibilityDirtyMode, mode_name, None)
+        if mode is None:
+            continue
+        try:
+            unreal.EditorLevelUtils.set_levels_visibility(
+                targets, flags, False, mode)
+            done = True
+            break
+        except Exception:
+            continue
+    if not done:
+        try:  # older signature without the dirty-mode argument
+            unreal.EditorLevelUtils.set_levels_visibility(targets, flags, False)
+            done = True
+        except Exception as exc:
+            unreal.log_warning("[SquadHeight] set_levels_visibility: %s" % exc)
 
 
 def main():
