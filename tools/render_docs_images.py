@@ -22,8 +22,9 @@ DOCS = os.path.join(ROOT, "docs")
 PROD = "https://squadcalc.app/api/img/maps/%s/heightmap.json"
 
 
-def load_ours(name):
-    p = os.path.join(OUTPUT, name, "heightmap_500.json")
+def load_ours(name, full=False):
+    fn = "heightmap.json" if full else "heightmap_500.json"
+    p = os.path.join(OUTPUT, name, fn)
     return np.array(json.load(open(p)), float)
 
 
@@ -103,12 +104,44 @@ def hero(name):
     print("%s  (%.0f KB)" % (out, os.path.getsize(out) / 1024))
 
 
+def _crop(a, frac):
+    """Crop array to fractional box (y0, y1, x0, x1)."""
+    y0, y1, x0, x1 = frac
+    h, w = a.shape
+    return a[int(h * y0):int(h * y1), int(w * x0):int(w * x1)]
+
+
+def zoom_comparison(name, slug, frac, panel=420):
+    """Same world patch: stock (SquadCalc, ~8 m/px) vs ours at full 1 m/px.
+    Both panels are scaled to the same pixel size, so the resolution and the
+    extra structures are directly visible."""
+    prod = _crop(load_prod(slug), frac)
+    ours = _crop(load_ours(name, full=True), frac)
+
+    def panel_img(z, text):
+        img = Image.fromarray(shade_gray(z)).resize((panel, panel), Image.BILINEAR)
+        return label(img, text)
+
+    left = panel_img(prod, "STOCK  (SquadCalc, terrain only, ~8 m/px)")
+    right = panel_img(ours, "TRUE SURFACE  (this repo, 1 m/px)")
+    gap = 10
+    canvas = Image.new("RGB", (left.width + gap + right.width, left.height),
+                       (255, 255, 255))
+    canvas.paste(left, (0, 0))
+    canvas.paste(right, (left.width + gap, 0))
+    out = os.path.join(DOCS, "zoom_%s.jpg" % name.lower())
+    canvas.save(out, "JPEG", quality=90, optimize=True)
+    print("%s  (%.0f KB)  ours patch %dx%d px" % (
+        out, os.path.getsize(out) / 1024, ours.shape[1], ours.shape[0]))
+
+
 def main():
     os.makedirs(DOCS, exist_ok=True)
-    comparison("AlBasrah", "albasrah")   # the map the in-app proof used
-    comparison("Narva", "narva")         # dense city, structures obvious
-    hero("Yehorivka")                    # clean large map, good colorized relief
-    print("\nDone. Embed the PNGs in README.md.")
+    # Whole-map overview: stock vs true-surface.
+    comparison("Narva", "narva")
+    # Zoomed to a few city blocks: shows the 1 m detail the overview can't.
+    zoom_comparison("Narva", "narva", (0.35, 0.62, 0.40, 0.67))
+    print("\nDone. Embed the JPGs in README.md.")
 
 
 if __name__ == "__main__":

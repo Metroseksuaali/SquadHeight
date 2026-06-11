@@ -149,11 +149,12 @@ Note: SquadCalc currently hardcodes the heightmap size to 500×500
 useful once that line reads the size from the loaded array instead
 (`this.width = this.json.length`).
 
-![Yehorivka heightmap, colorized relief](docs/hero_yehorivka.jpg)
+![Narva city blocks — stock 8 m/px vs true-surface 1 m/px](docs/zoom_narva.jpg)
 
-*An exported heightmap, colorized and hillshaded for illustration. The file
-itself is plain elevation values; this is just `tools/render_docs_images.py`
-applied to it.*
+*A few Narva city blocks, hillshaded. Left: the stock terrain-only data
+(~8 m per pixel) — blurry, no structures. Right: this repo's full 1 m data —
+individual buildings, streets and walls. (Renders for illustration; the files
+are plain elevation values.)*
 
 ## Map coverage — where maps live in the SDK
 
