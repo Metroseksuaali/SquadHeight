@@ -13,6 +13,23 @@ after a map update is a single script run.
 Verified working against the Squad SDK (UE5). A full 4 km map at 1 m
 resolution takes about 6 minutes (~45k traces/s).
 
+## Downloads — prebuilt heightmaps
+
+If you just want the data, you don't need to run anything. The latest export of
+all 26 maps is published under
+[**Releases**](https://github.com/Metroseksuaali/SquadHeight/releases/latest):
+
+* `squadcalc_heightmaps_500.zip` — the drop-in set, laid out as
+  `img/maps/<map>/heightmap.json` (500×500, exactly SquadCalc's API layout).
+  Start here.
+* `heightmaps_1m_fullres.zip` — full 1 m resolution `heightmap.json` +
+  `meta.json` per map.
+* `heightmap_images_16bit_png.zip` — 16-bit grayscale inspection renders.
+
+Format and the meaning of edge values are described below and in the
+`NOTES.txt` inside each zip. Rebuild the zips after a fresh export with
+`python tools/build_release_zips.py`.
+
 ## Quick start — export every map (step by step)
 
 This is the headless route: it exports all configured maps to `output/`
