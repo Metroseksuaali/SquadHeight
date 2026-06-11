@@ -1,6 +1,6 @@
 # SquadHeight
 
-True-surface heightmap exporter for the Squad SDK (Unreal editor), built for
+True-surface heightmap exporter for the Squad SDK (Unreal editor), built to get better maps to
 [SquadCalc](https://github.com/sh4rkman/SquadCalc).
 
 SquadCalc's current heightmaps come from the UE Landscape, which contains
