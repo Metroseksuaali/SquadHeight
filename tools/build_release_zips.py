@@ -34,8 +34,15 @@ stock heightmaps come from the terrain Landscape only.
 
 Generated with the open-source tool at:
   https://github.com/Metroseksuaali/SquadHeight
-Source: Squad Editor Public Testing (Mod SDK), UE5. Community export, not
-affiliated with Offworld Industries or SquadCalc.
+Source: Squad Editor Public Testing (Mod SDK), UE5.
+
+License / rights
+----------------
+The export TOOL is MIT licensed. THIS DATA is not: it is a derivative of Squad,
+(c) Offworld Industries, produced with the official Mod SDK. Squad and its
+assets are the property of Offworld Industries. This is an unofficial community
+project, not affiliated with or endorsed by OWI, shared for use with tools such
+as SquadCalc and subject to OWI's EULA and modding terms.
 
 Format
 ------

@@ -19,3 +19,22 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+-------------------------------------------------------------------------------
+
+Scope of this license
+
+The MIT license above applies to the SOURCE CODE in this repository (the
+export tools and scripts) and to nothing else.
+
+It does NOT cover the exported map data — the heightmaps and the images derived
+from them — distributed via GitHub Releases. That data is a derivative of
+Squad, which is created by and (c) Offworld Industries, produced here using the
+official Squad Mod SDK. Squad and all related game assets remain the property
+of Offworld Industries.
+
+This is an unofficial, community-made project. It is not affiliated with,
+endorsed by, or sponsored by Offworld Industries. The exported data is shared
+for use with community tools such as SquadCalc; Offworld Industries retains all
+rights to the underlying game content, governed by their EULA and modding
+terms.

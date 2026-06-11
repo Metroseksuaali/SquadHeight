@@ -405,3 +405,16 @@ coffee — it's appreciated and never expected.
 
 Thanks to [SquadCalc](https://github.com/sh4rkman/SquadCalc) for the calculator
 and for documenting the minimap bounds this exporter aligns to.
+
+## License
+
+* **Code** — the export tools in this repository are MIT licensed (see
+  [LICENSE](LICENSE)). The repository itself contains only original source
+  code; no game data is checked in.
+* **Map data** — the exported heightmaps and images (published under
+  [Releases](https://github.com/Metroseksuaali/SquadHeight/releases)) are a
+  derivative of Squad, © Offworld Industries, produced with the official Mod
+  SDK. They are **not** covered by the MIT license. Squad and its assets are
+  the property of Offworld Industries; this is an unofficial community project,
+  not affiliated with or endorsed by OWI, shared for use with tools like
+  SquadCalc and subject to OWI's EULA and modding terms.
