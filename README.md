@@ -197,6 +197,54 @@ You can also run `py ".../tools/batch_export.py"` inside an open editor to
 batch without going headless (useful if level streaming misbehaves in
 commandlets).
 
+## Adding a new map
+
+When Squad ships a new map, the pipeline is built to absorb it with almost no
+work — finding the level and its sublevels, excluding foliage, attaching
+streaming geometry, hole-filling and so on are all generic, not per-map. The
+only thing the tool genuinely needs is the map's **bounds**: the exact
+world-space square SquadCalc stretches its minimap over. That number comes
+from SquadCalc itself, so the normal path is to wait until the map appears in
+SquadCalc's `src/data/maps.js` (usually soon after the game update).
+
+Then, two small edits and a re-run:
+
+1. **Add the bounds.** Open the new map in SquadCalc's
+   [`src/data/maps.js`](https://github.com/sh4rkman/SquadCalc/blob/master/src/data/maps.js),
+   copy its `minimap.corner0` / `corner1`, and add one entry to
+   [tools/squadcalc_bounds.json](tools/squadcalc_bounds.json) in the same
+   shape as the others. This is what aligns every elevation lookup, so it is
+   required and must come from SquadCalc, not be guessed.
+
+2. **Add a name alias only if needed.** If the map's SDK folder name doesn't
+   contain the SquadCalc name (e.g. the Al Basrah rework lived under
+   `BASRAH_CITY`), add a one-line hint to `NAME_HINTS` in
+   [tools/make_config.py](tools/make_config.py). If the names already match,
+   skip this.
+
+3. **Regenerate and export.** Run `make_config.py` in the editor (it finds the
+   new World asset automatically, across `/Game/Maps` and any plugin content
+   roots), skim that its pick is the real playable level, then run
+   `run_batch_export.bat`. The new map exports alongside the rest.
+
+What's handled for you with no extra code: streaming sublevels are attached
+and forced visible, foliage and designer marker actors are excluded, holes are
+filled, and the editor resumes if it runs out of memory. These were the hard
+parts and they are already generic.
+
+Two cases need a little more care:
+
+* **The map isn't in SquadCalc yet.** There are no published bounds. You can
+  let the exporter auto-detect bounds from the Landscape (`bounds_m: null`) for
+  a rough look, but it will not line up with the eventual minimap. To derive
+  the real square before SquadCalc does, register against the in-game minimap
+  image with [tools/find_alignment.py](tools/find_alignment.py). This is the
+  rare exception, not the normal flow.
+* **A tilted minimap or unusual collision.** If a future map's minimap capture
+  isn't world-axis-aligned, `find_alignment.py` reports the rotation; set
+  `grid_rotation_deg` accordingly. Every current map is axis-aligned, so this
+  is unlikely.
+
 ## Configuration
 
 Everything lives in `CONFIG` at the top of
