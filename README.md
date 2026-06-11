@@ -10,6 +10,11 @@ with a top-down ray-trace of the actual world collision: structures are
 included, foliage (trees, bushes, landscape grass) is excluded. Re-exporting
 after a map update is a single script run.
 
+![Stock terrain vs true-surface — Narva](docs/compare_narva.jpg)
+
+*Same map, hillshaded. Left: the stock terrain-only heightmap. Right: this
+repo's true-surface scan — the entire city reads as real geometry.*
+
 Verified working against the Squad SDK (UE5). A full 4 km map at 1 m
 resolution takes about 6 minutes (~45k traces/s).
 
@@ -29,6 +34,8 @@ all 26 maps is published under
 Format and the meaning of edge values are described below and in the
 `NOTES.txt` inside each zip. Rebuild the zips after a fresh export with
 `python tools/build_release_zips.py`.
+
+![Yehorivka — colorized true-surface relief](docs/hero_yehorivka.jpg)
 
 ## Quick start — export every map (step by step)
 
@@ -264,6 +271,9 @@ Two cases need a little more care:
 
 ## Configuration
 
+<details>
+<summary>Show the settings that matter most</summary>
+
 Everything lives in `CONFIG` at the top of
 [tools/export_heightmap.py](tools/export_heightmap.py), commented in place.
 The ones that matter most:
@@ -285,7 +295,12 @@ The ones that matter most:
   `squadcalc_bounds.json` is axis-aligned, so this stays 0 unless
   `find_alignment.py` says otherwise for a new map.
 
+</details>
+
 ## How foliage is excluded
+
+<details>
+<summary>Show how trees and grass are skipped</summary>
 
 1. Every `InstancedFoliageActor` (all painted foliage) goes on the trace
    ignore list, so rays pass through trees at zero cost.
@@ -299,7 +314,12 @@ smooth ground in the PNG, not lumpy canopies. If trees leak through, click
 one in the editor, read its mesh path and add a suitable substring to
 `exclude_asset_path_keywords`.
 
+</details>
+
 ## Validating an export
+
+<details>
+<summary>Show how to diff against a legacy heightmap</summary>
 
 ```
 python tools/compare_heightmaps.py legacy_chora.json output/Chora/heightmap_500.json output/Chora/diff
@@ -322,7 +342,12 @@ python tools/find_alignment.py legacy.json output/MapName
 python tools/find_alignment.py --selftest output/MapName   # verify the tool first
 ```
 
+</details>
+
 ## Implementation notes
+
+<details>
+<summary>Show engine, seam, bridge and performance notes</summary>
 
 * **Engine compatibility:** written for UE5 with UE4.27 fallbacks. Reading
   trace hits differs between engine versions, so the exporter detects a
@@ -339,7 +364,12 @@ python tools/find_alignment.py --selftest output/MapName   # verify the tool fir
   with `ParallelFor`, which is orders of magnitude faster but requires
   building an editor module against the SDK.
 
+</details>
+
 ## Troubleshooting
+
+<details>
+<summary>Show common problems and fixes</summary>
 
 * `-run=pythonscript` says unknown commandlet → the Python plugin isn't
   enabled (see Setup).
@@ -352,3 +382,15 @@ python tools/find_alignment.py --selftest output/MapName   # verify the tool fir
 * The 16-bit PNG looks black → the gray range covers the full height span;
   tall surround mountains compress the playable area into a few gray levels.
   The data is fine — inspect `heightmap.json` or stretch the contrast.
+
+</details>
+
+## Support
+
+If this saved you time or you'd like to support the work, you can buy me a
+coffee — it's appreciated and never expected.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/metroseksuaali)
+
+Thanks to [SquadCalc](https://github.com/sh4rkman/SquadCalc) for the calculator
+and for documenting the minimap bounds this exporter aligns to.
