@@ -116,6 +116,11 @@ CONFIG = {
     # covers everything painted with the foliage tool.
     "exclude_actor_classes": ["InstancedFoliageActor"],
 
+    # Per-hit exclusion by actor class-name prefix. BP_POI_Reference covers
+    # the floating designer marker blobs that hang ~40 m above each point of
+    # interest on some maps (they have meshes AND collision).
+    "exclude_actor_class_prefixes": ["BP_POI_Reference"],
+
     # Hits on these component classes are skipped and the ray continues
     # downward (slow path, for foliage that is NOT on an IFA).
     "exclude_component_classes": [
@@ -465,7 +470,11 @@ def _is_excluded_hit(actor, component, cfg):
         ifa_class = getattr(unreal, "InstancedFoliageActor", None)
         if ifa_class is not None and isinstance(actor, ifa_class):
             return True
-        if actor.get_class().get_name() in cfg["exclude_actor_classes"]:
+        actor_class = actor.get_class().get_name()
+        if actor_class in cfg["exclude_actor_classes"]:
+            return True
+        if any(actor_class.startswith(p)
+               for p in cfg.get("exclude_actor_class_prefixes", ())):
             return True
 
     if component is not None:

@@ -100,6 +100,7 @@ _SUBLEVEL_SKIP = (
     "/development/", "/automation/", "_gpu", "/weatherlayer", "/wl_",
     "/ll_", "flythrough", "whitebox", "blockout", "old_delete", "/old",
     "wip", "playtest", "deprecated", "/050_cameras",
+    "refrence", "reference",  # designer POI marker levels (OWI typo included)
 )
 
 
