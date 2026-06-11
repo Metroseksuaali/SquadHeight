@@ -1,5 +1,11 @@
 # SquadHeight
 
+[![Unreal Engine 5](https://img.shields.io/badge/Unreal%20Engine-5-0e1128.svg?logo=unrealengine)](https://www.unrealengine.com/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Core dependencies: none](https://img.shields.io/badge/core%20deps-none-brightgreen.svg)](#requirements)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B.svg?logo=ko-fi&logoColor=white)](https://ko-fi.com/metroseksuaali)
+
 True-surface heightmap exporter for the Squad SDK (Unreal editor), built to get better maps to
 [SquadCalc](https://github.com/sh4rkman/SquadCalc).
 
@@ -173,6 +179,31 @@ Beware of legacy leftovers: `/Game/Maps/BASRAH_CITY` still contains the
 wrong for the current game. `tools/make_config.py` knows about the plugin
 roots and prefers them automatically.
 
+## Requirements
+
+<details>
+<summary>What you need (and what you don't)</summary>
+
+The core export pipeline has **no external dependencies** — it runs on the
+Python that ships inside the Squad SDK editor and uses only the standard
+library plus the bundled `tools/png16.py`. Nothing to `pip install` to export
+maps.
+
+| For | Needs |
+|---|---|
+| **Exporting maps** (`export_heightmap.py`, `batch_export.py`, `make_config.py`) | Squad SDK editor with the **Python Editor Script Plugin** enabled. No external Python packages. |
+| **Offline alignment / analysis** (`find_alignment.py`, `compare_heightmaps.py`) | System Python 3.10+; `find_alignment.py` needs **numpy**. |
+| **Doc / preview images** (`tools/render_docs_images.py`) | Python 3.10+, **numpy** and **Pillow**. |
+| **Local SquadCalc test harness** (`squadcalc-test/`) | **Docker** (Node and the app build are containerized). |
+
+Install the optional bits only if you use those tools:
+
+```sh
+pip install numpy pillow
+```
+
+</details>
+
 ## Setup
 
 1. Enable the **Python Editor Script Plugin** in the SDK editor
@@ -185,8 +216,9 @@ roots and prefers them automatically.
 
    or pass `-EnablePlugins=PythonScriptPlugin` on the command line.
 
-2. There are no other dependencies. Everything runs on UE's embedded Python,
-   except `find_alignment.py` which runs outside Unreal and needs numpy.
+2. No external Python packages are needed to export — everything runs on the
+   editor's embedded Python. The only extras are for the optional offline
+   tools; see [Requirements](#requirements).
 
 ## Exporting a map
 
@@ -234,6 +266,9 @@ commandlets).
 
 ## Adding a new map
 
+<details>
+<summary>Two small edits and a re-run — full steps</summary>
+
 When Squad ships a new map, the pipeline is built to absorb it with almost no
 work — finding the level and its sublevels, excluding foliage, attaching
 streaming geometry, hole-filling and so on are all generic, not per-map. The
@@ -279,6 +314,8 @@ Two cases need a little more care:
   isn't world-axis-aligned, `find_alignment.py` reports the rotation; set
   `grid_rotation_deg` accordingly. Every current map is axis-aligned, so this
   is unlikely.
+
+</details>
 
 ## Configuration
 
