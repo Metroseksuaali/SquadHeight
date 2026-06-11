@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Core dependencies: none](https://img.shields.io/badge/core%20deps-none-brightgreen.svg)](#requirements)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B.svg?logo=ko-fi&logoColor=white)](https://ko-fi.com/metroseksuaali)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B.svg?logo=kofi&logoColor=white)](https://ko-fi.com/metroseksuaali)
 
 True-surface heightmap exporter for the Squad SDK (Unreal editor), built to get better maps to
 [SquadCalc](https://github.com/sh4rkman/SquadCalc).
