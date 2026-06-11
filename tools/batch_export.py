@@ -267,6 +267,14 @@ def main():
                 "seconds": round(time.time() - t_map, 1),
             })
             # Keep going - one broken map should not kill the whole batch.
+        finally:
+            # Memory accumulates across map loads and eventually OOMs the
+            # editor (seen after ~9 maps on a 32 GB machine) - collect
+            # aggressively between maps.
+            try:
+                unreal.SystemLibrary.collect_garbage()
+            except Exception:
+                pass
 
     # Summary + machine-readable report for CI-style usage.
     ok = sum(1 for r in report if r["status"] in ("ok", "skipped"))

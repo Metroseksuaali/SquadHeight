@@ -33,14 +33,32 @@ REM        -EnablePlugins=PythonScriptPlugin
 REM  * Optionally append -NullRHI to run without a GPU/rendering device
 REM    (faster startup on build agents). If traces then come back empty on
 REM    your build, drop it again.
+REM  * The editor can run out of memory after many large maps; finished maps
+REM    are skipped on re-run, so the loop below simply relaunches the editor
+REM    until batch_export.py writes its final report.
+set "REPORT=%~dp0output\batch_report.json"
+if exist "%REPORT%" del "%REPORT%"
+set ATTEMPT=0
+
+:loop
+set /a ATTEMPT+=1
+if %ATTEMPT% GTR 15 (
+    echo [SquadHeight] Giving up after 15 editor runs without a finished report.
+    exit /b 1
+)
+echo [SquadHeight] === editor run %ATTEMPT% ===
 "%UE_CMD%" "%UPROJECT%" -run=pythonscript -script="%~dp0tools\batch_export.py" ^
     -stdout -FullStdOutLogOutput -Unattended -NoSplash -NoSound -NoLiveCoding
-
 set "RC=%ERRORLEVEL%"
+if exist "%REPORT%" goto done
+echo [SquadHeight] Editor exited without a final report (exit code %RC%) - resuming...
+goto loop
+
+:done
 if "%RC%"=="0" (
     echo [SquadHeight] Batch export finished OK.
 ) else (
-    echo [SquadHeight] Batch export FAILED or partially failed (exit code %RC%^).
+    echo [SquadHeight] Batch export finished with failures (exit code %RC%^).
     echo [SquadHeight] Check output above and output\batch_report.json.
 )
 exit /b %RC%
