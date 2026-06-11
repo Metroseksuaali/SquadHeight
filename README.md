@@ -13,7 +13,8 @@ after a map update is a single script run.
 ![Stock terrain vs true-surface — Narva](docs/compare_narva.jpg)
 
 *Same map, hillshaded. Left: the stock terrain-only heightmap. Right: this
-repo's true-surface scan — the entire city reads as real geometry.*
+repo's true-surface scan — the entire city reads as real geometry. (Both
+panels are renders for illustration; the actual data is plain JSON.)*
 
 Verified working against the Squad SDK (UE5). A full 4 km map at 1 m
 resolution takes about 6 minutes (~45k traces/s).
@@ -35,7 +36,10 @@ Format and the meaning of edge values are described below and in the
 `NOTES.txt` inside each zip. Rebuild the zips after a fresh export with
 `python tools/build_release_zips.py`.
 
-![Yehorivka — colorized true-surface relief](docs/hero_yehorivka.jpg)
+> The downloads contain the **raw data** (`heightmap.json`) plus 16-bit
+> **grayscale** inspection PNGs. The colorized/hillshaded images in this README
+> are renders made for illustration (`tools/render_docs_images.py`), not part
+> of the download.
 
 ## Quick start — export every map (step by step)
 
@@ -144,6 +148,12 @@ Note: SquadCalc currently hardcodes the heightmap size to 500×500
 (`squadHeightmaps.js`, `this.width = 500`). The full-resolution file becomes
 useful once that line reads the size from the loaded array instead
 (`this.width = this.json.length`).
+
+![Yehorivka heightmap, colorized relief](docs/hero_yehorivka.jpg)
+
+*An exported heightmap, colorized and hillshaded for illustration. The file
+itself is plain elevation values; this is just `tools/render_docs_images.py`
+applied to it.*
 
 ## Map coverage — where maps live in the SDK
 
