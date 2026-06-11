@@ -117,14 +117,20 @@ CONFIG = {
     "exclude_actor_classes": ["InstancedFoliageActor"],
 
     # Hits on these component classes are skipped and the ray continues
-    # downward. Foliage classes cover trees that are NOT on an IFA; the
-    # shape/brush components are invisible collision volumes (map boundary
-    # zones, water blockers, triggers) that block the Visibility channel but
-    # are not real surfaces - on Al Basrah a single kind of BoxComponent
-    # covered 12% of the map before these were excluded.
+    # downward (slow path, for foliage that is NOT on an IFA).
     "exclude_component_classes": [
         "FoliageInstancedStaticMeshComponent",
         "LandscapeGrassComponent",
+    ],
+
+    # Shape/brush components are skipped ONLY when their owning actor has no
+    # static meshes. Pure volume actors (map boundary blockers, water
+    # blockers - one BoxComponent covered 12% of Al Basrah) are not real
+    # surfaces, but old-style building blueprints (Chora's afg houses) use a
+    # box as their collision shell - excluding those would erase the
+    # buildings from the heightmap, so a box on a mesh-bearing actor counts
+    # as a surface.
+    "volume_shape_component_classes": [
         "BoxComponent",
         "SphereComponent",
         "CapsuleComponent",
@@ -434,8 +440,27 @@ def _is_landscape_ground(actor, component):
     return True
 
 
+# Per-run cache: does this actor own any StaticMeshComponent? Used to tell
+# real geometry (building blueprint with a box collision shell) apart from
+# pure invisible volumes (boundary/water blockers). Reset by run_export.
+_ACTOR_HAS_MESH = {}
+
+
+def _actor_has_mesh(actor):
+    key = id(actor)
+    cached = _ACTOR_HAS_MESH.get(key)
+    if cached is None:
+        try:
+            cached = len(actor.get_components_by_class(
+                unreal.StaticMeshComponent)) > 0
+        except Exception:
+            cached = True  # when in doubt, keep the hit
+        _ACTOR_HAS_MESH[key] = cached
+    return cached
+
+
 def _is_excluded_hit(actor, component, cfg):
-    """Per-hit foliage filtering (slow path) - see CONFIG keys for rationale."""
+    """Per-hit foliage/volume filtering - see CONFIG keys for rationale."""
     if actor is not None:
         ifa_class = getattr(unreal, "InstancedFoliageActor", None)
         if ifa_class is not None and isinstance(actor, ifa_class):
@@ -447,6 +472,11 @@ def _is_excluded_hit(actor, component, cfg):
         comp_class = component.get_class().get_name()
         if comp_class in cfg["exclude_component_classes"]:
             return True
+        # Invisible collision volumes: skip unless the shape belongs to an
+        # actor that also carries real meshes (a building's collision shell).
+        if comp_class in cfg.get("volume_shape_component_classes", ()):
+            if actor is None or not _actor_has_mesh(actor):
+                return True
         # Landscape grass: ISM/HISM component owned by a LandscapeProxy.
         if (
             actor is not None
@@ -704,6 +734,7 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     world = get_editor_world()
     if map_name is None:
         map_name = world.get_name()
+    _ACTOR_HAS_MESH.clear()  # actor ids are only valid within one map
 
     if output_dir is None:
         output_dir = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", "output"))
