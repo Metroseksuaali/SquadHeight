@@ -817,27 +817,36 @@ def run_export(output_dir=None, map_name=None, overrides=None):
         raise RuntimeError("No geometry was hit at all - check trace channel/bounds.")
 
     if no_hit:
-        # No-hit cells are usually hairline collision gaps along landscape
-        # streaming-proxy seams (thin staircase lines on rotated landscapes)
-        # plus areas outside any geometry. Filling them with the map minimum
-        # creates ugly black cracks, so instead flood-fill each hole with the
-        # average of its valid neighbors, growing inward pass by pass.
+        # Two kinds of holes: hairline collision gaps along landscape proxy
+        # seams (must be neighbor-filled or they show as cracks) and big
+        # genuinely empty regions (ocean, out-of-play corners of the minimap
+        # square - the legacy heightmaps used a constant there). A frontier
+        # walk fills thin gaps from their neighbors for a bounded number of
+        # passes without ever materializing the full hole set (11M holes in
+        # a Python set has crashed the editor); the rest gets the map min.
         unreal.log_warning(
-            "[SquadHeight] %d cells had no hit (landscape seam gaps / out-of-"
-            "level areas); filling from nearest valid neighbors." % no_hit
+            "[SquadHeight] %d cells had no hit; neighbor-filling thin gaps, "
+            "min-filling large empty regions." % no_hit
         )
-        holes = set()
-        for r in range(len(rows)):
-            row = rows[r]
-            for c in range(len(row)):
-                if math.isnan(row[c]):
-                    holes.add((r, c))
         neighbors = ((1, 0), (-1, 0), (0, 1), (0, -1),
                      (1, 1), (1, -1), (-1, 1), (-1, -1))
         max_r, max_c = len(rows), len(rows[0])
-        while holes:
-            filled_this_pass = []
-            for (r, c) in holes:
+        frontier = []
+        for r in range(max_r):
+            row = rows[r]
+            for c in range(max_c):
+                if math.isnan(row[c]):
+                    for dr, dc in neighbors:
+                        rr, cc = r + dr, c + dc
+                        if (0 <= rr < max_r and 0 <= cc < max_c
+                                and not math.isnan(rows[rr][cc])):
+                            frontier.append((r, c))
+                            break
+        for _ in range(12):  # fills gaps up to ~24 cells wide
+            if not frontier:
+                break
+            next_frontier = set()
+            for (r, c) in frontier:
                 total, count = 0.0, 0
                 for dr, dc in neighbors:
                     rr, cc = r + dr, c + dc
@@ -847,16 +856,22 @@ def run_export(output_dir=None, map_name=None, overrides=None):
                             total += v
                             count += 1
                 if count:
-                    filled_this_pass.append((r, c, total / count))
-            if not filled_this_pass:
-                # Should not happen (only if the whole grid is NaN, which is
-                # caught above) - bail out with min instead of looping forever.
-                for (r, c) in holes:
-                    rows[r][c] = h_min
-                break
-            for r, c, v in filled_this_pass:
-                rows[r][c] = v
-                holes.discard((r, c))
+                    rows[r][c] = total / count
+                    for dr, dc in neighbors:
+                        rr, cc = r + dr, c + dc
+                        if (0 <= rr < max_r and 0 <= cc < max_c
+                                and math.isnan(rows[rr][cc])):
+                            next_frontier.add((rr, cc))
+            frontier = list(next_frontier)
+        remaining = 0
+        for row in rows:
+            for i in range(len(row)):
+                if math.isnan(row[i]):
+                    row[i] = h_min
+                    remaining += 1
+        if remaining:
+            unreal.log("[SquadHeight] %d cells in large empty regions filled "
+                       "with min height %.2f m." % (remaining, h_min))
 
     z_offset = h_min if cfg["normalize_min_to_zero"] else 0.0
     if z_offset:
