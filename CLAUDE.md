@@ -63,16 +63,36 @@ what a working session needs that the README doesn't.
    `/Game/Maps/BASRAH_CITY` is a pre-rework leftover — never export it.
 8. This UE build has no `GameplayStatics.break_hit_result`; hit parsing
    auto-detects a strategy (this SDK: `to_tuple()`).
+9. **Commandlet scans silently miss collision on un-finalized meshes**:
+   async asset compilation finishes on worker threads but its game-thread
+   finalization is never pumped in a commandlet, so static meshes can sit
+   without collision indefinitely (sleeping does NOT help; component-level
+   traces miss too; collision settings all look perfect). Which meshes are
+   affected varies per run/map — Tallil once exported with ~2% of its
+   structures (57k vs 3.38M structure cells), Chora lost its houses while
+   keeping walls — and the result looks plausible. Tells in `meta.json`:
+   absurdly low `structure_cells`, near-empty `hit_assets_top`, large
+   `no_hit_cells_filled`. Fix (built into `export_heightmap.py`,
+   `_settle_async_collision`): run the finish-compilation console-command
+   battery (`StaticMesh.FinishCompilation` etc.) and repeat a sparse pre-scan
+   until the structure-hit count stabilizes, before the real scan; rounds are
+   recorded in `meta.json` (`collision_settle_rounds`). Belt-and-suspenders
+   for delivery exports: `SQUADHEIGHT_ONE_MAP=1` gives every map a fresh
+   editor process via the .bat relaunch loop.
 
 ## Data semantics worth remembering
 
 * Heights are meters, min-normalized to 0; `world_z = value + z_offset_m`.
-* Water and out-of-play ground read 0 — correct for mortar math. Maps whose
-  landscape doesn't fill the minimap square (notably Chora) have zero-filled
-  out-of-play borders; the playable area is accurate. Don't "fix" the borders
-  by inventing terrain.
-* Jensen/Kamdesh/Pacific legitimately have few structures (gameplay-spawned
-  props / instances that don't register); legacy data was terrain-only anyway.
+* Water reads as a flat plateau and true out-of-play voids read 0 — correct
+  for mortar math. Since the collision-settle fix (gotcha 9) most surround
+  terrain (Chora/Kamdesh/Lashkar mountains, Sanxian sea, Tallil background
+  mesh) is real captured geometry; only genuinely empty borders remain on
+  BlackCoast/Harju/Kohat/Kokan/Skorpo/Mestia (identical across independent
+  runs — don't "fix" them by inventing terrain).
+* Pacific legitimately has few structures (range props are gameplay-spawned).
+  Jensen/Kamdesh were once thought to be the same — wrong: that was gotcha 9
+  hiding their camps/compounds (3 → 25k and 1.3k → 1.13M structure cells
+  after the fix).
 * SquadCalc hardcodes heightmap width 500 (`squadHeightmaps.js`) and has no
   heightmap data in its repo — it fetches `${API_URL}/img/maps/<map>/heightmap.json`
   from its API server, which only its author controls. Shipping our data means
@@ -82,6 +102,10 @@ what a working session needs that the README doesn't.
 
 `tools/diag_map.py` (level inventory + test rays, env `SQUADHEIGHT_DIAG_MAP`),
 `tools/probe_points.py` (which actor a ray hits at given XY, env
-`SQUADHEIGHT_PROBE`), `meta.json`'s `hit_assets_top` histogram (spot foliage
-leaks / weird actors), `squadcalc-test/render_compare.py` (ours vs production
-side by side).
+`SQUADHEIGHT_PROBE`), `tools/probe_hangars.py` (find actors by keyword, dump
+their collision setup, trace over them with Visibility/Camera/profile/
+object-type queries — built for the Tallil hangar case), `meta.json`'s
+`hit_assets_top` histogram (spot foliage leaks / weird actors; histograms
+written before 2026-06-12 are garbage — a cache keyed by recycled
+`id(component)` attributed most hits to one asset), and
+`squadcalc-test/render_compare.py` (ours vs production side by side).

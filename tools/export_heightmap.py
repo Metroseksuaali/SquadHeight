@@ -409,6 +409,71 @@ def compute_bounds(world, cfg):
 # Hit classification
 # ============================================================================
 
+# Async asset compilation leaves static meshes WITHOUT COLLISION until the
+# finalization runs on the game thread - and in a commandlet nothing pumps
+# it, so whole building sets silently vanish from the scan (Chora's houses,
+# Tallil's hangars; which meshes make it varies run to run). These console
+# commands force the pending compilations to finish; which name exists varies
+# by engine build, unknown ones are ignored, and running the whole battery
+# costs ~half a second. Verified on Squad SDK 5.7: canary traces over Chora's
+# mosque/police station went from landscape-only to correct roof heights.
+_FINISH_COMPILATION_CMDS = (
+    "StaticMesh.FinishCompilation",
+    "FinishAllAssetCompilation",
+    "Editor.AsyncAssetCompilationFinishAll",
+)
+
+
+def _settle_async_collision(world, tracer, n_cols, n_rows, step,
+                            half_u, half_v, center_x, center_y,
+                            cos_r, sin_r):
+    """
+    Force async asset compilation to finish, then verify with a sparse
+    pre-scan (~64x64 columns) repeated until the structure-hit count stops
+    changing between rounds. Returns (rounds_used, final_sparse_count).
+    """
+    stride_r = max(1, n_rows // 64)
+    stride_c = max(1, n_cols // 64)
+
+    def sparse_structure_count():
+        n = 0
+        for r in range(0, n_rows, stride_r):
+            v = r * step - half_v
+            for c in range(0, n_cols, stride_c):
+                u = c * step - half_u
+                x = center_x + u * cos_r - v * sin_r
+                y = center_y + u * sin_r + v * cos_r
+                z, _landscape_z, is_structure = tracer.sample_column(x, y)
+                if z is not None and is_structure:
+                    n += 1
+        return n
+
+    prev = -1
+    n = 0
+    rounds = 0
+    for rounds in range(1, 9):
+        for cmd in _FINISH_COMPILATION_CMDS:
+            try:
+                unreal.SystemLibrary.execute_console_command(world, cmd)
+            except Exception:
+                pass
+        n = sparse_structure_count()
+        unreal.log("[SquadHeight] collision settle round %d: %d structure "
+                   "hits in sparse pre-scan" % (rounds, n))
+        if n == prev:
+            break
+        prev = n
+        time.sleep(0.5)
+    else:
+        unreal.log_warning("[SquadHeight] structure hits did NOT stabilize "
+                           "in 8 rounds - export may be incomplete!")
+    # The pre-scan ran through the tracer - reset its diagnostics so
+    # meta.json reflects the real scan only.
+    tracer.mesh_counts = {}
+    tracer.foliage_skips = 0
+    return rounds, n
+
+
 def _build_ignore_list(world, cfg):
     """
     Collect actors to exclude from tracing entirely. This is the FAST path
@@ -540,23 +605,21 @@ class _Tracer(object):
         # their asset paths tell you what to add to
         # exclude_asset_path_keywords. Costs almost nothing (cached lookups).
         self.mesh_counts = {}
-        self._comp_path_cache = {}
 
     def _count_hit_asset(self, component):
-        key = id(component)
-        path = self._comp_path_cache.get(key)
-        if path is None:
-            path = "<unknown>"
-            try:
-                if isinstance(component, unreal.StaticMeshComponent):
-                    mesh = component.static_mesh
-                    if mesh is not None:
-                        path = mesh.get_path_name()
-                elif component is not None:
-                    path = "<%s>" % component.get_class().get_name()
-            except Exception:
-                pass
-            self._comp_path_cache[key] = path
+        # No caching by id(component): the Python wrapper objects are
+        # transient and their ids get recycled, which silently attributed
+        # most hits to whatever component first claimed the id.
+        path = "<unknown>"
+        try:
+            if isinstance(component, unreal.StaticMeshComponent):
+                mesh = component.static_mesh
+                if mesh is not None:
+                    path = mesh.get_path_name()
+            elif component is not None:
+                path = "<%s>" % component.get_class().get_name()
+        except Exception:
+            pass
         self.mesh_counts[path] = self.mesh_counts.get(path, 0) + 1
 
     def _trace_once(self, x, y, z_start):
@@ -798,6 +861,11 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     )
 
     tracer = _Tracer(world, cfg, ignore_actors, z_top, z_bottom)
+
+    settle_rounds, settle_hits = _settle_async_collision(
+        world, tracer, n_cols, n_rows, step, half_u, half_v,
+        center_x, center_y, cos_r, sin_r)
+
     rows = []
     no_hit = 0
     structure_cells = 0
@@ -970,6 +1038,8 @@ def run_export(output_dir=None, map_name=None, overrides=None):
             "structure_cells": structure_cells,
             "landscape_fallback_cells": landscape_fallbacks,
             "no_hit_cells_filled": no_hit,
+            "collision_settle_rounds": settle_rounds,
+            "collision_settle_sparse_hits": settle_hits,
             "foliage_hits_skipped": tracer.foliage_skips,
             "overhang_drops": tracer.overhang_drops,
             "ignored_foliage_actors": len(ignore_actors),

@@ -254,10 +254,21 @@ def main():
     if not maps:
         raise RuntimeError("Config %s has an empty 'maps' list." % config_path)
 
-    unreal.log("[SquadHeight] Batch export: %d map(s), output root: %s"
-               % (len(maps), output_root))
+    # One-map mode: export only the FIRST pending map, then exit without
+    # writing the final report, so the .bat relaunch loop starts a fresh
+    # editor process for every map. A long multi-map session can silently
+    # lose collision on attached sublevels (Tallil exported with ~2% of its
+    # structures as map ~22 of one session); a fresh process per map is the
+    # reliable fix. The report - the .bat's stop signal - is only written by
+    # the run that finds every map already exported.
+    one_map = bool(os.environ.get("SQUADHEIGHT_ONE_MAP"))
+
+    unreal.log("[SquadHeight] Batch export: %d map(s), output root: %s%s"
+               % (len(maps), output_root,
+                  " (one map per editor run)" if one_map else ""))
 
     report = []
+    finished_early = False
     t_batch = time.time()
     for i, entry in enumerate(maps):
         level = entry["level"]
@@ -315,6 +326,12 @@ def main():
             except Exception:
                 pass
 
+        if one_map and report and report[-1]["status"] in ("ok", "failed"):
+            unreal.log("[SquadHeight] one-map mode: exiting after %s; "
+                       "the relaunch loop continues with the next map." % level)
+            finished_early = True
+            break
+
     # Summary + machine-readable report for CI-style usage.
     ok = sum(1 for r in report if r["status"] in ("ok", "skipped"))
     unreal.log("[SquadHeight] Batch finished: %d/%d ok in %.0f s"
@@ -324,11 +341,13 @@ def main():
             r["status"].upper(), r["level"], r["seconds"])
         (unreal.log if r["status"] != "failed" else unreal.log_error)(line)
 
-    if not os.path.isdir(output_root):
-        os.makedirs(output_root)
-    with open(os.path.join(output_root, "batch_report.json"), "w") as f:
-        json.dump({"finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                   "results": report}, f, indent=2)
+    if not finished_early:
+        if not os.path.isdir(output_root):
+            os.makedirs(output_root)
+        with open(os.path.join(output_root, "batch_report.json"), "w") as f:
+            json.dump({"finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                     time.gmtime()),
+                       "results": report}, f, indent=2)
 
     if ok != len(report):
         # Non-zero exit so the .bat / CI can detect partial failure.

@@ -36,14 +36,18 @@ REM    your build, drop it again.
 REM  * The editor can run out of memory after many large maps; finished maps
 REM    are skipped on re-run, so the loop below simply relaunches the editor
 REM    until batch_export.py writes its final report.
+REM  * Set SQUADHEIGHT_ONE_MAP=1 to export ONE map per editor run (fresh
+REM    process every map). Slower, but immune to the silent collision loss
+REM    seen in long multi-map sessions (Tallil exported with ~2% of its
+REM    structures as map ~22 of one session). Recommended for final exports.
 set "REPORT=%~dp0output\batch_report.json"
 if exist "%REPORT%" del "%REPORT%"
 set ATTEMPT=0
 
 :loop
 set /a ATTEMPT+=1
-if %ATTEMPT% GTR 15 (
-    echo [SquadHeight] Giving up after 15 editor runs without a finished report.
+if %ATTEMPT% GTR 40 (
+    echo [SquadHeight] Giving up after 40 editor runs without a finished report.
     exit /b 1
 )
 echo [SquadHeight] === editor run %ATTEMPT% ===
