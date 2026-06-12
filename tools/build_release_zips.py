@@ -64,10 +64,12 @@ What the values mean at the edges
 ---------------------------------
 * Water and out-of-play ground read as the map minimum (0). A flat sea surface
   is the correct value for mortar math.
-* Where the SDK map's landscape does not fill the whole minimap square, the
-  uncovered border is 0. The PLAYABLE AREA IS ACCURATE; only the out-of-play
-  border lacks data. Most visible on Chora (non-square landscape). No terrain
-  is invented there - extending edges would fabricate false plateaus.
+* Out-of-play surround geometry that exists in the SDK (e.g. Chora/Kamdesh/
+  Lashkar mountains, Tallil background terrain, Sanxian sea) is captured.
+  Where the square truly contains nothing (parts of Black Coast, Harju,
+  Kohat, Kokan, Skorpo, Mestia edges) the border reads 0. The PLAYABLE AREA
+  IS ACCURATE; no terrain is invented - extending edges would fabricate
+  false plateaus.
 * Heights are truer than the old Landscape data, including peaks: where the
   stock heightmaps clip tall terrain, these keep the real value (e.g. Skorpo
   peaks to ~1064 m, not ~557 m).
