@@ -3,7 +3,7 @@
 [![Unreal Engine 5](https://img.shields.io/badge/Unreal%20Engine-5-0e1128.svg?logo=unrealengine)](https://www.unrealengine.com/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Core dependencies: none](https://img.shields.io/badge/core%20deps-none-brightgreen.svg)](#requirements)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3.0](https://img.shields.io/badge/License-AGPL%20v3.0-blue.svg)](LICENSE)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B.svg?logo=kofi&logoColor=white)](https://ko-fi.com/metroseksuaali)
 
 True-surface heightmap exporter for the Squad SDK (Unreal editor), built to get better maps to
@@ -445,13 +445,11 @@ and for documenting the minimap bounds this exporter aligns to.
 
 ## License
 
-* **Code** — the export tools in this repository are MIT licensed (see
-  [LICENSE](LICENSE)). The repository itself contains only original source
-  code; no game data is checked in.
+* **Code** — the export tools in this repository are GNU Affero General Public License v3.0 licensed (see [LICENSE](LICENSE)). The repository itself contains only original source code; no game data is checked in.
 * **Map data** — the exported heightmaps and images (published under
   [Releases](https://github.com/Metroseksuaali/SquadHeight/releases)) are a
   derivative of Squad, © Offworld Industries, produced with the official Mod
-  SDK. They are **not** covered by the MIT license. Squad and its assets are
+  SDK. They are **not** covered by the AGPL license. Squad and its assets are
   the property of Offworld Industries; this is an unofficial community project,
   not affiliated with or endorsed by OWI, shared for use with tools like
   SquadCalc and subject to OWI's EULA and modding terms.
