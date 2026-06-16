@@ -13,10 +13,17 @@ Outputs (per map, into <output_dir>/<MapName>/):
     heightmap.json   - 2D array of heights in METERS, min normalized to 0.
                        Same format as SquadCalc's existing server-side
                        heightmaps (see heightmap_chora_example.json).
-    heightmap.png    - 16-bit grayscale PNG for visual inspection.
+    heightmap_16bit.png - 16-bit grayscale PNG for visual inspection.
+    heightmap_8bit.png  - 8-bit grayscale PNG (smaller, lossier preview only).
     meta.json        - bounds, resolution, min/max, z-offset, PNG scaling,
                        stats.  Everything SquadCalc needs to interpret the
                        data is in here AND logged to the output log.
+
+Also maintained directly in <output_dir>/ (one level up, shared across maps):
+    scaling.json     - {map_name: {png16_meters_per_unit, png8_meters_per_unit}}
+                       recap of every map's PNG scaling, merged in after each
+                       map so you don't have to open every meta.json to check
+                       one value.
 
 How to run (interactively, inside the SDK editor):
     1. Window -> Developer Tools -> Output Log, switch the input to "Python"
@@ -188,6 +195,11 @@ CONFIG = {
 
     # Heights are rounded to 2 decimals (cm precision) like the example file.
     "json_decimals": 2,
+
+    # zlib compression level (0-9) for both heightmap.png (16-bit) and
+    # heightmap_8bit.png (8-bit, written alongside it for smaller previews).
+    # 9 = smallest file, slowest to write.
+    "png_compress_level": 9,
 
     # Orientation fixes, applied to BOTH json and png so they always agree.
     # Defaults: row index = world Y (min->max), col index = world X (min->max).
@@ -749,16 +761,41 @@ def _write_json(path, rows, decimals):
         f.write("]")
 
 
-def _write_png(path, rows, h_min, h_max):
-    """16-bit grayscale: 0 = h_min, 65535 = h_max."""
+def _update_scaling_recap(output_dir, map_name, png16_meters_per_unit,
+                           png8_meters_per_unit):
+    """
+    Merge this map's PNG scaling into <output_dir>/scaling.json, a one-file
+    recap of every map's scaling so it doesn't take opening 25 meta.json
+    files to check one. Read-merge-write because batch_export.py's relaunch
+    loop (gotcha 5 in CLAUDE.md) runs one map per editor process - this file
+    must accumulate correctly across separate processes, unlike
+    batch_report.json which only the final completing run writes.
+    """
+    path = os.path.join(output_dir, "scaling.json")
+    recap = {}
+    if os.path.isfile(path):
+        with open(path, "r") as f:
+            recap = json.load(f)
+    recap[map_name] = {
+        "png16_meters_per_unit": png16_meters_per_unit,
+        "png8_meters_per_unit": png8_meters_per_unit,
+    }
+    with open(path, "w") as f:
+        json.dump(recap, f, indent=2, sort_keys=True)
+
+
+def _write_png(path, rows, h_min, h_max, bit_depth=16, compress_level=9):
+    """Grayscale PNG: 0 = h_min, max_val = h_max. Returns the scale used."""
+    max_val = (1 << bit_depth) - 1
     span = h_max - h_min
-    scale = 65535.0 / span if span > 1e-9 else 0.0
+    scale = max_val / span if span > 1e-9 else 0.0
 
     def row_iter():
         for row in rows:
             yield [int((v - h_min) * scale + 0.5) for v in row]
 
-    png16.write_gray_png(path, len(rows[0]), len(rows), row_iter(), bit_depth=16)
+    png16.write_gray_png(path, len(rows[0]), len(rows), row_iter(),
+                          bit_depth=bit_depth, compress_level=compress_level)
     return scale
 
 
@@ -992,9 +1029,13 @@ def run_export(output_dir=None, map_name=None, overrides=None):
 
     # ---- Write outputs ------------------------------------------------------
     json_path = os.path.join(map_dir, "heightmap.json")
-    png_path = os.path.join(map_dir, "heightmap.png")
+    png_path = os.path.join(map_dir, "heightmap_16bit.png")
+    png8_path = os.path.join(map_dir, "heightmap_8bit.png")
     _write_json(json_path, rows, cfg["json_decimals"])
-    png_scale = _write_png(png_path, rows, out_min, out_max)
+    png_scale = _write_png(png_path, rows, out_min, out_max,
+                            bit_depth=16, compress_level=cfg["png_compress_level"])
+    png8_scale = _write_png(png8_path, rows, out_min, out_max,
+                             bit_depth=8, compress_level=cfg["png_compress_level"])
 
     down_path = None
     if cfg["downsample_to"]:
@@ -1025,14 +1066,19 @@ def run_export(output_dir=None, map_name=None, overrides=None):
         # --- Z scaling info for SquadCalc -----------------------------------
         # heightmap.json values are METERS, already offset so min == 0.
         # To recover absolute UE world Z (m): world_z = value + z_offset_m.
-        # PNG: gray16 = (height_m - 0) * png_units_per_meter
+        # heightmap_16bit.png: gray16 = (height_m - 0) * png16_units_per_meter
+        # heightmap_8bit.png:  gray8  = (height_m - 0) * png8_units_per_meter
+        # (8-bit is lossier - 256 levels instead of 65536 - small preview
+        # file only, not the source of truth).
         "z_offset_m": round(z_offset, 4),
         "height_min_m": round(out_min, 4),
         "height_max_m": round(out_max, 4),
         "world_z_min_m": round(h_min, 4),
         "world_z_max_m": round(h_max, 4),
-        "png_units_per_meter": round(png_scale, 6),
-        "png_meters_per_unit": round((out_max - out_min) / 65535.0, 9),
+        "png16_units_per_meter": round(png_scale, 6),
+        "png16_meters_per_unit": round((out_max - out_min) / 65535.0, 9),
+        "png8_units_per_meter": round(png8_scale, 6),
+        "png8_meters_per_unit": round((out_max - out_min) / 255.0, 9),
         "stats": {
             "scan_seconds": round(scan_seconds, 1),
             "structure_cells": structure_cells,
@@ -1055,12 +1101,15 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     }
     with open(os.path.join(map_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
+    _update_scaling_recap(output_dir, map_name,
+                           meta["png16_meters_per_unit"],
+                           meta["png8_meters_per_unit"])
 
     unreal.log("[SquadHeight] ----- DONE: %s -----" % map_name)
     unreal.log("[SquadHeight] height min/max: %.2f / %.2f m (z_offset %.2f m, "
                "world Z %.2f..%.2f m)"
                % (out_min, out_max, z_offset, h_min, h_max))
-    unreal.log("[SquadHeight] PNG scale: %.4f gray-units per meter "
+    unreal.log("[SquadHeight] 16-bit PNG scale: %.4f gray-units per meter "
                "(%.6f m per gray-unit)"
                % (png_scale, (out_max - out_min) / 65535.0))
     unreal.log("[SquadHeight] cells on structures: %d, foliage hits skipped: %d, "
@@ -1068,8 +1117,10 @@ def run_export(output_dir=None, map_name=None, overrides=None):
                % (structure_cells, tracer.foliage_skips, scan_seconds))
     unreal.log("[SquadHeight] wrote: %s" % json_path)
     unreal.log("[SquadHeight]        %s" % png_path)
+    unreal.log("[SquadHeight]        %s" % png8_path)
     if down_path:
         unreal.log("[SquadHeight]        %s" % down_path)
+    unreal.log("[SquadHeight]        %s" % os.path.join(output_dir, "scaling.json"))
     return map_dir
 
 

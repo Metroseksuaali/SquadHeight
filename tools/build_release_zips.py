@@ -120,7 +120,7 @@ def build():
         add_notes(zf)
         n = 0
         for name, d in maps():
-            png = os.path.join(d, "heightmap.png")
+            png = os.path.join(d, "heightmap_16bit.png")
             if os.path.isfile(png):
                 zf.write(png, "%s/heightmap.png" % name)
                 n += 1

@@ -74,9 +74,9 @@ without you babysitting the editor. Do this once per SDK/map update.
    resumes — finished maps are skipped — so just let it run to the end.
 
 5. **Collect the results.** Each map lands in `output/<MapName>/`
-   (`heightmap.json` full-res, `heightmap_500.json` drop-in, `heightmap.png`,
-   `meta.json`). A final `output/batch_report.json` lists every map with OK /
-   failed and timing.
+   (`heightmap.json` full-res, `heightmap_500.json` drop-in, `heightmap_16bit.png`,
+   `heightmap_8bit.png`, `meta.json`). A final `output/batch_report.json` lists
+   every map with OK / failed and timing.
 
 6. **Check it before shipping (optional).** `squadcalc-test/` runs a local
    copy of SquadCalc against these files so you can see the elevation on the
@@ -143,7 +143,8 @@ Each export writes `output/<MapName>/`:
 |---|---|
 | `heightmap.json` | 2D JSON array of heights in meters, min normalized to 0, full resolution |
 | `heightmap_500.json` | 500×500 nearest-neighbor downsample — drop-in replacement for SquadCalc's current files (written when `downsample_to: 500` is set) |
-| `heightmap.png` | 16-bit grayscale render for inspection |
+| `heightmap_16bit.png` | 16-bit grayscale render for inspection |
+| `heightmap_8bit.png` | 8-bit grayscale render — smaller, lossier preview only |
 | `meta.json` | bounds, resolution, z-offset, PNG scaling, trace statistics |
 
 Heights are absolute world Z minus `z_offset_m` (stored in `meta.json`), so

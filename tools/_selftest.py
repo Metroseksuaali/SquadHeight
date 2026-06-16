@@ -124,6 +124,32 @@ check("heightmap png values",
       and abs(decoded[0][1] - 32768) <= 1 and abs(decoded[1][0] - 16384) <= 1,
       str(decoded))
 
+hp8 = os.path.join(tmp, "hm8.png")
+scale8 = eh._write_png(hp8, hrows, 0.0, 20.0, bit_depth=8, compress_level=9)
+_, _, d8, _, decoded8 = decode_png(hp8)
+check("heightmap png8 header", d8 == 8)
+check("heightmap png8 scale", abs(scale8 - 255.0 / 20.0) < 1e-6)
+check("heightmap png8 values",
+      decoded8[0][0] == 0 and decoded8[1][1] == 255
+      and abs(decoded8[0][1] - 128) <= 1 and abs(decoded8[1][0] - 64) <= 1,
+      str(decoded8))
+
+# ---- scaling.json recap merge ------------------------------------------------
+eh._update_scaling_recap(tmp, "MapA", 0.001, 0.2)
+eh._update_scaling_recap(tmp, "MapB", 0.002, 0.3)
+with open(os.path.join(tmp, "scaling.json")) as f:
+    recap = json.load(f)
+check("scaling recap has both maps", set(recap) == {"MapA", "MapB"}, str(recap))
+check("scaling recap values", recap["MapA"] == {
+    "png16_meters_per_unit": 0.001, "png8_meters_per_unit": 0.2})
+
+eh._update_scaling_recap(tmp, "MapA", 0.005, 0.4)
+with open(os.path.join(tmp, "scaling.json")) as f:
+    recap = json.load(f)
+check("scaling recap overwrite + preserve sibling",
+      recap["MapA"]["png16_meters_per_unit"] == 0.005 and "MapB" in recap,
+      str(recap))
+
 print()
 if failures:
     print("FAILED: %d check(s): %s" % (len(failures), ", ".join(failures)))
