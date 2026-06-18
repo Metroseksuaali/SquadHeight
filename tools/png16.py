@@ -37,6 +37,28 @@ def _chunk(tag, data):
     )
 
 
+def _paeth_filter(raw, prior, bpp):
+    """
+    PNG filter type 4 (Paeth): predict each byte from the reconstructed
+    neighbours left/above/above-left, store the residual. Heightmaps are
+    smooth, so residuals cluster near 0 and zlib compresses them much better
+    than the raw values - this is what actually shrinks the file, not the
+    zlib level. Used unconditionally (no per-row None/Sub/Up/Average
+    comparison) to keep this a single pass over the data; numpy isn't
+    available inside the UE editor where this module runs.
+    """
+    out = bytearray(len(raw))
+    for i in range(len(raw)):
+        a = raw[i - bpp] if i >= bpp else 0
+        b = prior[i]
+        c = prior[i - bpp] if i >= bpp else 0
+        p = a + b - c
+        pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+        pred = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+        out[i] = (raw[i] - pred) & 0xFF
+    return bytes(out)
+
+
 def write_gray_png(path, width, height, rows, bit_depth=16, compress_level=6):
     """
     Write a grayscale PNG.
@@ -55,19 +77,26 @@ def write_gray_png(path, width, height, rows, bit_depth=16, compress_level=6):
     # compression 0, filter 0, interlace 0.
     ihdr = struct.pack(">IIBBBBB", width, height, bit_depth, 0, 0, 0, 0)
 
-    # Filtered scanlines: each row is prefixed with filter type 0 (None).
+    # Filtered scanlines: each row is Paeth-filtered (type 4) against the
+    # previous row, then prefixed with its filter type byte.
     # 16-bit samples are big-endian per the PNG spec.
+    bpp = bit_depth // 8
+    prior = bytes(width * bpp)
     compressor = zlib.compressobj(compress_level)
     idat_parts = []
     row_count = 0
     if bit_depth == 16:
         row_packer = struct.Struct(">%dH" % width)
         for row in rows:
-            idat_parts.append(compressor.compress(b"\x00" + row_packer.pack(*row)))
+            raw = row_packer.pack(*row)
+            idat_parts.append(compressor.compress(b"\x04" + _paeth_filter(raw, prior, bpp)))
+            prior = raw
             row_count += 1
     else:
         for row in rows:
-            idat_parts.append(compressor.compress(b"\x00" + bytes(row)))
+            raw = bytes(row)
+            idat_parts.append(compressor.compress(b"\x04" + _paeth_filter(raw, prior, bpp)))
+            prior = raw
             row_count += 1
     idat_parts.append(compressor.flush())
 
@@ -97,11 +126,15 @@ def write_rgb_png(path, width, height, rows, compress_level=6):
     # compression 0, filter 0, interlace 0.
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
 
+    bpp = 3
+    prior = bytes(width * bpp)
     compressor = zlib.compressobj(compress_level)
     idat_parts = []
     row_count = 0
     for row in rows:
-        idat_parts.append(compressor.compress(b"\x00" + bytes(row)))
+        raw = bytes(row)
+        idat_parts.append(compressor.compress(b"\x04" + _paeth_filter(raw, prior, bpp)))
+        prior = raw
         row_count += 1
     idat_parts.append(compressor.flush())
 
