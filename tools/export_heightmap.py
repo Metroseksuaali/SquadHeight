@@ -15,15 +15,20 @@ Outputs (per map, into <output_dir>/<MapName>/):
                        heightmaps (see heightmap_chora_example.json).
     heightmap_16bit.png - 16-bit grayscale PNG for visual inspection.
     heightmap_8bit.png  - 8-bit grayscale PNG (smaller, lossier preview only).
+    heightmap_rb.png  - 8-bit RGB PNG, NOT greyscale: height is split across
+                       the R and B channels (G always 0) for ~511 levels of
+                       precision in a file the same byte depth as the 8-bit
+                       preview. Decode: raw = 255 + R - B (0..510), height_m
+                       = raw * meta.json's rb_meters_per_unit.
     meta.json        - bounds, resolution, min/max, z-offset, PNG scaling,
                        stats.  Everything SquadCalc needs to interpret the
                        data is in here AND logged to the output log.
 
 Also maintained directly in <output_dir>/ (one level up, shared across maps):
-    scaling.json     - {map_name: {png16_meters_per_unit, png8_meters_per_unit}}
-                       recap of every map's PNG scaling, merged in after each
-                       map so you don't have to open every meta.json to check
-                       one value.
+    scaling.json     - {map_name: {png16_meters_per_unit, png8_meters_per_unit,
+                       rb_meters_per_unit}} recap of every map's PNG scaling,
+                       merged in after each map so you don't have to open
+                       every meta.json to check one value.
 
 How to run (interactively, inside the SDK editor):
     1. Window -> Developer Tools -> Output Log, switch the input to "Python"
@@ -762,7 +767,7 @@ def _write_json(path, rows, decimals):
 
 
 def _update_scaling_recap(output_dir, map_name, png16_meters_per_unit,
-                           png8_meters_per_unit):
+                           png8_meters_per_unit, rb_meters_per_unit):
     """
     Merge this map's PNG scaling into <output_dir>/scaling.json, a one-file
     recap of every map's scaling so it doesn't take opening 25 meta.json
@@ -779,6 +784,7 @@ def _update_scaling_recap(output_dir, map_name, png16_meters_per_unit,
     recap[map_name] = {
         "png16_meters_per_unit": png16_meters_per_unit,
         "png8_meters_per_unit": png8_meters_per_unit,
+        "rb_meters_per_unit": rb_meters_per_unit,
     }
     with open(path, "w") as f:
         json.dump(recap, f, indent=2, sort_keys=True)
@@ -796,6 +802,42 @@ def _write_png(path, rows, h_min, h_max, bit_depth=16, compress_level=9):
 
     png16.write_gray_png(path, len(rows[0]), len(rows), row_iter(),
                           bit_depth=bit_depth, compress_level=compress_level)
+    return scale
+
+
+# Max raw value encodable across R+B (255 + R - B, R/B each in [0, 255]).
+_RB_MAX_RAW = 510
+
+
+def _write_rb_png(path, rows, h_min, h_max, compress_level=9):
+    """
+    Non-greyscale 8-bit RGB PNG: height is split across R and B for ~511
+    levels (vs 256 for a single 8-bit grey channel) at the same byte depth.
+    G is always 0. Decode (JS side): raw = 255 + R - B; height = raw * scale.
+
+    Encoding is the exact inverse, split so each channel ramps monotonically
+    (good for zlib - one channel is constant while the other moves):
+        raw in [0, 255]   -> R=0,        B=255-raw
+        raw in [256, 510]  -> R=raw-255,  B=0
+    Returns the scale used (raw units per meter).
+    """
+    span = h_max - h_min
+    scale = _RB_MAX_RAW / span if span > 1e-9 else 0.0
+
+    def row_iter():
+        for row in rows:
+            pixels = []
+            for v in row:
+                raw = int((v - h_min) * scale + 0.5)
+                raw = 0 if raw < 0 else (_RB_MAX_RAW if raw > _RB_MAX_RAW else raw)
+                if raw <= 255:
+                    pixels.extend((0, 0, 255 - raw))
+                else:
+                    pixels.extend((raw - 255, 0, 0))
+            yield pixels
+
+    png16.write_rgb_png(path, len(rows[0]), len(rows), row_iter(),
+                         compress_level=compress_level)
     return scale
 
 
@@ -1031,11 +1073,14 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     json_path = os.path.join(map_dir, "heightmap.json")
     png_path = os.path.join(map_dir, "heightmap_16bit.png")
     png8_path = os.path.join(map_dir, "heightmap_8bit.png")
+    png_rb_path = os.path.join(map_dir, "heightmap_rb.png")
     _write_json(json_path, rows, cfg["json_decimals"])
     png_scale = _write_png(png_path, rows, out_min, out_max,
                             bit_depth=16, compress_level=cfg["png_compress_level"])
     png8_scale = _write_png(png8_path, rows, out_min, out_max,
                              bit_depth=8, compress_level=cfg["png_compress_level"])
+    rb_scale = _write_rb_png(png_rb_path, rows, out_min, out_max,
+                              compress_level=cfg["png_compress_level"])
 
     down_path = None
     if cfg["downsample_to"]:
@@ -1070,6 +1115,9 @@ def run_export(output_dir=None, map_name=None, overrides=None):
         # heightmap_8bit.png:  gray8  = (height_m - 0) * png8_units_per_meter
         # (8-bit is lossier - 256 levels instead of 65536 - small preview
         # file only, not the source of truth).
+        # heightmap_rb.png: NOT greyscale - raw = 255 + R - B (0..510) =
+        # (height_m - 0) * rb_units_per_meter; height_m = raw * rb_meters_per_unit.
+        # ~511 levels (vs 256 for 8-bit grey) at the same 8-bit byte depth.
         "z_offset_m": round(z_offset, 4),
         "height_min_m": round(out_min, 4),
         "height_max_m": round(out_max, 4),
@@ -1079,6 +1127,8 @@ def run_export(output_dir=None, map_name=None, overrides=None):
         "png16_meters_per_unit": round((out_max - out_min) / 65535.0, 9),
         "png8_units_per_meter": round(png8_scale, 6),
         "png8_meters_per_unit": round((out_max - out_min) / 255.0, 9),
+        "rb_units_per_meter": round(rb_scale, 6),
+        "rb_meters_per_unit": round((out_max - out_min) / _RB_MAX_RAW, 9),
         "stats": {
             "scan_seconds": round(scan_seconds, 1),
             "structure_cells": structure_cells,
@@ -1103,7 +1153,8 @@ def run_export(output_dir=None, map_name=None, overrides=None):
         json.dump(meta, f, indent=2)
     _update_scaling_recap(output_dir, map_name,
                            meta["png16_meters_per_unit"],
-                           meta["png8_meters_per_unit"])
+                           meta["png8_meters_per_unit"],
+                           meta["rb_meters_per_unit"])
 
     unreal.log("[SquadHeight] ----- DONE: %s -----" % map_name)
     unreal.log("[SquadHeight] height min/max: %.2f / %.2f m (z_offset %.2f m, "
@@ -1118,6 +1169,7 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     unreal.log("[SquadHeight] wrote: %s" % json_path)
     unreal.log("[SquadHeight]        %s" % png_path)
     unreal.log("[SquadHeight]        %s" % png8_path)
+    unreal.log("[SquadHeight]        %s" % png_rb_path)
     if down_path:
         unreal.log("[SquadHeight]        %s" % down_path)
     unreal.log("[SquadHeight]        %s" % os.path.join(output_dir, "scaling.json"))
