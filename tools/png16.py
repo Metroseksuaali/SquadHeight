@@ -1,19 +1,24 @@
 """
-png16.py - minimal, dependency-free PNG writer (grayscale, 8-bit or 16-bit).
+png16.py - minimal, dependency-free PNG writer (grayscale 8/16-bit, or
+truecolor RGB 8-bit).
 
 Why this exists:
     UE's bundled Python does NOT ship with Pillow, and we want the exporter to
     be fully self-contained.  PNG is simple enough to write by hand for the
-    non-interlaced grayscale case: a fixed signature + IHDR + IDAT (zlib of
+    non-interlaced cases here: a fixed signature + IHDR + IDAT (zlib of
     filtered scanlines) + IEND.  Only stdlib (struct, zlib) is used, which is
     always available in UE's embedded Python (3.7+).
 
 Usage:
-    from png16 import write_gray_png
+    from png16 import write_gray_png, write_rgb_png
     write_gray_png("out.png", width, height, rows, bit_depth=16)
+    write_rgb_png("out.png", width, height, rows)
 
-    `rows` is any iterable yielding `height` iterables of `width` ints,
-    each in [0, 255] for bit_depth=8 or [0, 65535] for bit_depth=16.
+    For write_gray_png, `rows` is any iterable yielding `height` iterables of
+    `width` ints, each in [0, 255] for bit_depth=8 or [0, 65535] for
+    bit_depth=16.
+    For write_rgb_png, `rows` is any iterable yielding `height` iterables of
+    `width * 3` ints in [0, 255] (interleaved R, G, B per pixel).
 """
 
 import struct
@@ -64,6 +69,40 @@ def write_gray_png(path, width, height, rows, bit_depth=16, compress_level=6):
         for row in rows:
             idat_parts.append(compressor.compress(b"\x00" + bytes(row)))
             row_count += 1
+    idat_parts.append(compressor.flush())
+
+    if row_count != height:
+        raise ValueError(
+            "row iterator produced %d rows, expected %d" % (row_count, height)
+        )
+
+    with open(path, "wb") as f:
+        f.write(_PNG_SIGNATURE)
+        f.write(_chunk(b"IHDR", ihdr))
+        f.write(_chunk(b"IDAT", b"".join(idat_parts)))
+        f.write(_chunk(b"IEND", b""))
+
+
+def write_rgb_png(path, width, height, rows, compress_level=6):
+    """
+    Write an 8-bit truecolor (RGB) PNG.
+
+    path           : output file path
+    width, height  : image dimensions in pixels
+    rows           : iterable of rows; each row is an iterable of
+                      width * 3 ints in [0, 255] (interleaved R, G, B),
+                      consumed lazily so a generator is fine.
+    """
+    # IHDR: width, height, bit depth 8, color type 2 (truecolor),
+    # compression 0, filter 0, interlace 0.
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+
+    compressor = zlib.compressobj(compress_level)
+    idat_parts = []
+    row_count = 0
+    for row in rows:
+        idat_parts.append(compressor.compress(b"\x00" + bytes(row)))
+        row_count += 1
     idat_parts.append(compressor.flush())
 
     if row_count != height:

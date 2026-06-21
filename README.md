@@ -74,9 +74,9 @@ without you babysitting the editor. Do this once per SDK/map update.
    resumes — finished maps are skipped — so just let it run to the end.
 
 5. **Collect the results.** Each map lands in `output/<MapName>/`
-   (`heightmap.json` full-res, `heightmap_500.json` drop-in, `heightmap.png`,
-   `meta.json`). A final `output/batch_report.json` lists every map with OK /
-   failed and timing.
+   (`heightmap.json` full-res, `heightmap_500.json` drop-in, `heightmap_16bit.png`,
+   `heightmap_8bit.png`, `heightmap_rb.png`, `meta.json`). A final
+   `output/batch_report.json` lists every map with OK / failed and timing.
 
 6. **Check it before shipping (optional).** `squadcalc-test/` runs a local
    copy of SquadCalc against these files so you can see the elevation on the
@@ -130,7 +130,7 @@ tools/
   squadcalc_bounds.json         exact SquadCalc minimap bounds for all maps
   compare_heightmaps.py         diff a new export against a legacy heightmap
   find_alignment.py             recover minimap bounds by image registration
-  png16.py                      dependency-free 8/16-bit grayscale PNG writer
+  png16.py                      dependency-free grayscale (8/16-bit) + RGB (8-bit) PNG writer
   _selftest.py                  offline tests (no Unreal needed)
 plan_b_cpp/                     C++ commandlet skeleton (optional, see below)
 ```
@@ -143,7 +143,9 @@ Each export writes `output/<MapName>/`:
 |---|---|
 | `heightmap.json` | 2D JSON array of heights in meters, min normalized to 0, full resolution |
 | `heightmap_500.json` | 500×500 nearest-neighbor downsample — drop-in replacement for SquadCalc's current files (written when `downsample_to: 500` is set) |
-| `heightmap.png` | 16-bit grayscale render for inspection |
+| `heightmap_16bit.png` | 16-bit grayscale render for inspection |
+| `heightmap_8bit.png` | 8-bit grayscale render — smaller, lossier preview only |
+| `heightmap_rb.png` | 8-bit RGB render, NOT grayscale: height split across R and B (G always 0) for ~511 levels at the same byte depth as `heightmap_8bit.png`. Decode `raw = 255 + R - B` (0..510), then `height_m = raw * meta.json["rb_meters_per_unit"]` |
 | `meta.json` | bounds, resolution, z-offset, PNG scaling, trace statistics |
 
 Heights are absolute world Z minus `z_offset_m` (stored in `meta.json`), so

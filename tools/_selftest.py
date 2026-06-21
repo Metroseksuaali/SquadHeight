@@ -87,14 +87,15 @@ def decode_png(path):
         pos += 12 + length
     w, h, depth, ctype = struct.unpack(">IIBB", chunks[b"IHDR"][:10])
     raw = zlib.decompress(chunks[b"IDAT"])
-    bpp = depth // 8
+    channels = 3 if ctype == 2 else 1  # only grayscale(0)/truecolor(2) used here
+    bpp = (depth // 8) * channels
     stride = 1 + w * bpp
     out = []
     for r in range(h):
         line = raw[r * stride:(r + 1) * stride]
         assert line[0] == 0, "unexpected filter type"
         if depth == 16:
-            out.append(list(struct.unpack(">%dH" % w, line[1:])))
+            out.append(list(struct.unpack(">%dH" % (w * channels), line[1:])))
         else:
             out.append(list(line[1:]))
     return w, h, depth, ctype, out
@@ -113,6 +114,14 @@ w, h, d, ct, decoded = decode_png(p8)
 check("png8 header", (w, h, d, ct) == (3, 2, 8, 0))
 check("png8 pixels", decoded == px8)
 
+# ---- png16.write_rgb_png: 2x2 truecolor round-trip ---------------------------
+px_rgb = [[10, 0, 245, 255, 0, 0], [0, 0, 255, 5, 0, 0]]  # 2 px/row, RGB
+prgb = os.path.join(tmp, "trgb.png")
+png16.write_rgb_png(prgb, 2, 2, px_rgb)
+w, h, d, ct, decoded_rgb = decode_png(prgb)
+check("rgb header", (w, h, d, ct) == (2, 2, 8, 2))
+check("rgb pixels", decoded_rgb == px_rgb, str(decoded_rgb))
+
 # ---- _write_png scaling round-trip -------------------------------------------
 hp = os.path.join(tmp, "hm.png")
 hrows = [array("f", [0.0, 10.0]), array("f", [5.0, 20.0])]
@@ -123,6 +132,53 @@ check("heightmap png values",
       decoded[0][0] == 0 and decoded[1][1] == 65535
       and abs(decoded[0][1] - 32768) <= 1 and abs(decoded[1][0] - 16384) <= 1,
       str(decoded))
+
+hp8 = os.path.join(tmp, "hm8.png")
+scale8 = eh._write_png(hp8, hrows, 0.0, 20.0, bit_depth=8, compress_level=9)
+_, _, d8, _, decoded8 = decode_png(hp8)
+check("heightmap png8 header", d8 == 8)
+check("heightmap png8 scale", abs(scale8 - 255.0 / 20.0) < 1e-6)
+check("heightmap png8 values",
+      decoded8[0][0] == 0 and decoded8[1][1] == 255
+      and abs(decoded8[0][1] - 128) <= 1 and abs(decoded8[1][0] - 64) <= 1,
+      str(decoded8))
+
+# ---- _write_rb_png scaling round-trip (R+B encoding, raw = 255 + R - B) ------
+hp_rb = os.path.join(tmp, "hm_rb.png")
+scale_rb = eh._write_rb_png(hp_rb, hrows, 0.0, 20.0, compress_level=9)
+_, _, d_rb, ct_rb, decoded_rb = decode_png(hp_rb)
+check("heightmap rb header", (d_rb, ct_rb) == (8, 2))
+check("heightmap rb scale", abs(scale_rb - 510.0 / 20.0) < 1e-6)
+
+
+def _rb_raw(pixel_bytes, px_idx):
+    r, g, b = pixel_bytes[px_idx * 3:px_idx * 3 + 3]
+    return 255 + r - b
+
+
+check("heightmap rb values",
+      _rb_raw(decoded_rb[0], 0) == 0          # v=0.0  -> raw 0
+      and _rb_raw(decoded_rb[0], 1) == 255    # v=10.0 -> raw 255
+      and abs(_rb_raw(decoded_rb[1], 0) - 128) <= 1  # v=5.0  -> raw ~127.5
+      and _rb_raw(decoded_rb[1], 1) == 510,   # v=20.0 -> raw 510
+      str(decoded_rb))
+
+# ---- scaling.json recap merge ------------------------------------------------
+eh._update_scaling_recap(tmp, "MapA", 0.001, 0.2, 0.05)
+eh._update_scaling_recap(tmp, "MapB", 0.002, 0.3, 0.06)
+with open(os.path.join(tmp, "scaling.json")) as f:
+    recap = json.load(f)
+check("scaling recap has both maps", set(recap) == {"MapA", "MapB"}, str(recap))
+check("scaling recap values", recap["MapA"] == {
+    "png16_meters_per_unit": 0.001, "png8_meters_per_unit": 0.2,
+    "rb_meters_per_unit": 0.05})
+
+eh._update_scaling_recap(tmp, "MapA", 0.005, 0.4, 0.07)
+with open(os.path.join(tmp, "scaling.json")) as f:
+    recap = json.load(f)
+check("scaling recap overwrite + preserve sibling",
+      recap["MapA"]["png16_meters_per_unit"] == 0.005 and "MapB" in recap,
+      str(recap))
 
 print()
 if failures:
