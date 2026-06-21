@@ -159,7 +159,7 @@ CONFIG = {
     # Keep this conservative: "foliage" catches the usual folder layout.
     # Add e.g. "tree_", "bush_", "water" after inspecting Squad's content
     # naming - see README "Verifying foliage exclusion".
-    "exclude_asset_path_keywords": ["foliage"],
+    "exclude_asset_path_keywords": ["foliage", "surroundmesh"],
 
     # ---- Surface selection ----------------------------------------------
     # A 2.5D heightmap can store only ONE value per cell. Two behaviours:

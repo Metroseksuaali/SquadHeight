@@ -54,7 +54,13 @@ what a working session needs that the README doesn't.
    has no static meshes** — old-style buildings use box collision shells, and
    excluding all boxes erased Chora's houses.
 4. `BP_POI_Reference*` designer markers float ~40 m above POIs — excluded by
-   actor-class prefix.
+   actor-class prefix. `BP_Ocean_Squad` is an invisible ocean-volume actor
+   (BoxComponent at minimum Z) that correctly represents water surface — do
+   NOT exclude it or 1.7M+ cells lose coverage and get min-filled.
+   `SurroundMesh` background terrain props (e.g. `SM_AlBasrah_SurroundMesh`)
+   extend into export bounds at near-zero height at their edges, corrupting
+   corner/edge cells — excluded via `exclude_asset_path_keywords` keyword
+   `"surroundmesh"`.
 5. The editor OOMs after ~8 large maps — the .bat relaunch-loops and resumes
    (maps with `meta.json` are skipped; `SQUADHEIGHT_FORCE` overrides).
 6. Hole filling: bounded frontier walk for seam cracks, min-fill for large
