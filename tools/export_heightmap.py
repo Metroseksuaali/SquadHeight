@@ -729,6 +729,96 @@ class _Tracer(object):
 # Output helpers
 # ============================================================================
 
+_PROGRESS_BAR_WIDTH = 24
+_console_file = None
+_console_failed = False
+
+
+def _console_write(text):
+    """
+    Write straight to the Windows console (CONOUT$), bypassing sys.stdout.
+    UnrealEditor-Cmd.exe mirrors its entire log (thousands of asset-load
+    lines) to whatever stdout is, with no flag to filter that down to just
+    errors - so run_batch_export.bat redirects the editor's stdout/stderr to
+    a dated file under logs/ and relies on this function for the cmd
+    window's live status instead. CONOUT$ is the literal console device,
+    independent of stdout redirection. Falls back to sys.stdout if CONOUT$
+    can't be opened (e.g. not on Windows, or no console attached - the
+    interactive in-editor run uses the GUI ScopedSlowTask dialog instead and
+    never calls this).
+    """
+    global _console_file, _console_failed
+    if not _console_failed:
+        if _console_file is None:
+            try:
+                _console_file = open("CONOUT$", "w")
+            except OSError:
+                _console_failed = True
+        if _console_file is not None:
+            try:
+                _console_file.write(text)
+                _console_file.flush()
+                return
+            except OSError:
+                _console_failed = True
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+_log_failed = False
+
+
+def _log_write(text):
+    """
+    Append straight to the run's dated log file, NOT shown live in the cmd
+    window. Used for detail worth keeping in the log but that would clutter
+    or fight with the live progress bar if it also went to the console (e.g.
+    periodic row-scan checkpoints, which the bar already covers visually).
+
+    Writes via os.write(1, ...) - the raw stdout file descriptor - rather
+    than through sys.stdout or a fresh open() of the log path. Both of those
+    were tried first and both silently produced an empty log: UE's embedded
+    Python's sys.stdout is not reliably wired to the OS-level stream the
+    .bat's redirect (>>"%RUNLOG%" 2>&1) captures, and separately open()-ing
+    that same path collides with the handle the .bat's redirect already
+    holds open on it (Windows sharing violation -> OSError -> silently
+    disabled). fd 1 IS that already-open handle, inherited from the parent
+    process, so reusing it sidesteps both problems. No-ops if fd 1 isn't
+    writable (e.g. an interactive editor session with no redirect at all).
+    """
+    global _log_failed
+    if _log_failed:
+        return
+    try:
+        os.write(1, text.encode("utf-8", "replace"))
+    except OSError:
+        _log_failed = True
+
+
+def _status(text):
+    """One-line milestone: shown live in the console AND persisted to the
+    run's log file - use for things worth seeing both live and later."""
+    _console_write(text)
+    _log_write(text)
+
+
+def _print_progress_bar(row, n_rows, rate, eta_s):
+    """
+    Redraw one line in place via a bare carriage return - deliberately
+    bypasses unreal.log(), which always prepends a timestamp and a newline
+    (no way to suppress that), so it can never update in place. Fixed-width
+    fields so every redraw is the same length and never leaves stray
+    characters from a longer previous line.
+    """
+    frac = row / n_rows if n_rows else 1.0
+    filled = int(frac * _PROGRESS_BAR_WIDTH)
+    bar = "#" * filled + "-" * (_PROGRESS_BAR_WIDTH - filled)
+    _console_write(
+        "\r[%s] row %6d/%-6d %5.1f%%  %7.0f tr/s  ETA %3dm%02ds"
+        % (bar, row, n_rows, frac * 100, rate, int(eta_s // 60), int(eta_s % 60))
+    )
+
+
 def _fmt_height(v, decimals):
     """Format like the legacy files: '16.32', '7.5', '0' (no trailing zeros)."""
     s = "%.*f" % (decimals, v)
@@ -955,6 +1045,7 @@ def run_export(output_dir=None, map_name=None, overrides=None):
         task.make_dialog(True)  # progress bar + Cancel button in the editor
         for r in range(n_rows):
             if task.should_cancel():
+                _console_write("\n")
                 unreal.log_warning("[SquadHeight] Cancelled by user at row %d." % r)
                 return None
             v = r * step - half_v
@@ -979,14 +1070,18 @@ def run_export(output_dir=None, map_name=None, overrides=None):
             rows.append(row)
 
             task.enter_progress_frame(1)
+            elapsed = time.time() - t0
+            rate = (r + 1) * n_cols / max(elapsed, 1e-6)
+            eta = (n_rows - r - 1) * n_cols / max(rate, 1e-6)
+            # Live single-line bar on the console only - too frequent and not
+            # newline-terminated to belong in a log file.
+            _print_progress_bar(r + 1, n_rows, rate, eta)
             if (r + 1) % cfg["log_every_rows"] == 0 or r == n_rows - 1:
-                elapsed = time.time() - t0
-                rate = (r + 1) * n_cols / max(elapsed, 1e-6)
-                eta = (n_rows - r - 1) * n_cols / max(rate, 1e-6)
-                unreal.log(
-                    "[SquadHeight] row %d/%d  (%.0f traces/s, ETA %dm%02ds)"
-                    % (r + 1, n_rows, rate, int(eta // 60), int(eta % 60))
-                )
+                line = ("[SquadHeight] row %d/%d  (%.0f traces/s, ETA %dm%02ds)"
+                        % (r + 1, n_rows, rate, int(eta // 60), int(eta % 60)))
+                unreal.log(line)  # -> Saved/Logs
+                _log_write(line + "\n")  # -> logs/export_<timestamp>.log
+    _console_write("\n")
 
     scan_seconds = time.time() - t0
 
@@ -1074,11 +1169,15 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     png_path = os.path.join(map_dir, "heightmap_16bit.png")
     png8_path = os.path.join(map_dir, "heightmap_8bit.png")
     png_rb_path = os.path.join(map_dir, "heightmap_rb.png")
+    _status("Saving heightmap.json...\n")
     _write_json(json_path, rows, cfg["json_decimals"])
+    _status("Saving heightmap_16bit.png...\n")
     png_scale = _write_png(png_path, rows, out_min, out_max,
                             bit_depth=16, compress_level=cfg["png_compress_level"])
+    _status("Saving heightmap_8bit.png...\n")
     png8_scale = _write_png(png8_path, rows, out_min, out_max,
                              bit_depth=8, compress_level=cfg["png_compress_level"])
+    _status("Saving heightmap_rb.png...\n")
     rb_scale = _write_rb_png(png_rb_path, rows, out_min, out_max,
                               compress_level=cfg["png_compress_level"])
 
@@ -1086,6 +1185,7 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     if cfg["downsample_to"]:
         n = int(cfg["downsample_to"])
         down_path = os.path.join(map_dir, "heightmap_%d.json" % n)
+        _status("Saving heightmap_%d.json...\n" % n)
         _write_json(down_path, _downsample(rows, n), cfg["json_decimals"])
 
     meta = {
@@ -1149,6 +1249,7 @@ def run_export(output_dir=None, map_name=None, overrides=None):
                                key=lambda kv: -kv[1])[:40]
         ],
     }
+    _status("Saving meta.json...\n")
     with open(os.path.join(map_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
     _update_scaling_recap(output_dir, map_name,

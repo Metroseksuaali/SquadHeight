@@ -72,6 +72,31 @@ check("downsample dims", len(small) == 5 and len(small[0]) == 5)
 check("downsample nearest", small[0][0] == 0.0 and small[4][4] == 88.0)
 
 # ---- png16: write 16-bit and 8-bit, then decode by hand and compare ----------
+def _unfilter_row(ftype, filtered, prior, bpp):
+    """Inverse of png16's per-row PNG filter, for round-trip verification."""
+    if ftype == 0:
+        return bytes(filtered)
+    out = bytearray(len(filtered))
+    for i in range(len(filtered)):
+        a = out[i - bpp] if i >= bpp else 0
+        b = prior[i]
+        if ftype == 1:  # Sub
+            out[i] = (filtered[i] + a) & 0xFF
+        elif ftype == 2:  # Up
+            out[i] = (filtered[i] + b) & 0xFF
+        elif ftype == 3:  # Average
+            out[i] = (filtered[i] + ((a + b) >> 1)) & 0xFF
+        elif ftype == 4:  # Paeth
+            c = prior[i - bpp] if i >= bpp else 0
+            p = a + b - c
+            pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+            pred = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+            out[i] = (filtered[i] + pred) & 0xFF
+        else:
+            raise ValueError("bad filter type %d" % ftype)
+    return bytes(out)
+
+
 def decode_png(path):
     data = open(path, "rb").read()
     assert data[:8] == b"\x89PNG\r\n\x1a\n", "bad signature"
@@ -91,13 +116,15 @@ def decode_png(path):
     bpp = (depth // 8) * channels
     stride = 1 + w * bpp
     out = []
+    prior = bytes(w * bpp)
     for r in range(h):
         line = raw[r * stride:(r + 1) * stride]
-        assert line[0] == 0, "unexpected filter type"
+        recon = _unfilter_row(line[0], line[1:], prior, bpp)
+        prior = recon
         if depth == 16:
-            out.append(list(struct.unpack(">%dH" % (w * channels), line[1:])))
+            out.append(list(struct.unpack(">%dH" % (w * channels), recon)))
         else:
-            out.append(list(line[1:]))
+            out.append(list(recon))
     return w, h, depth, ctype, out
 
 px16 = [[0, 1000, 65535], [123, 40000, 7]]

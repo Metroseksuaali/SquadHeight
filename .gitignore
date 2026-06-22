@@ -1,6 +1,9 @@
 # exporter output (large, regenerated per machine)
 output/
 
+# per-run engine/script logs (run_batch_export.bat)
+logs/
+
 # local SquadCalc test harness: cloned upstream app + staged heightmap data.
 # Keep the small config (Dockerfile, nginx.conf, compose, scripts) tracked.
 squadcalc-test/SquadCalc/
