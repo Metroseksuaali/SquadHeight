@@ -1,21 +1,32 @@
 """
 make_config.py - generate maps_config.json by scanning the SDK's map assets.
 
-Runs INSIDE the Unreal editor (any map can be open; nothing is loaded).
-It lists all World assets under /Game/Maps via the asset registry, matches
-them against the maps in squadcalc_bounds.json, and writes a ready-to-run
-maps_config.json next to this script.
+Reads the asset registry only - nothing is loaded, no map needs to be open.
+It lists all World assets under /Game/Maps (and the game-feature plugin
+roots) via the asset registry, matches them against the maps in
+squadcalc_bounds.json, and writes a ready-to-run maps_config.json next to
+this script.
 
-HOW TO RUN (in the editor's Output Log console at the bottom):
+HOW TO RUN:
 
-  Cmd mode (recommended - the dropdown shows "Cmd"):
-      py "<path-to-repo>/tools/make_config.py"
+  Headless (no editor window - run ../run_make_config.bat, which reuses the
+  paths in settings.bat just like the batch exporter):
+      UnrealEditor-Cmd.exe <Project.uproject> -run=pythonscript
+          -script="<path-to-repo>/tools/make_config.py"
+          -stdout -FullStdOutLogOutput -Unattended -NoSplash
+  The chosen level for each map (and its alternatives) is printed to the log,
+  so you can still review the picks afterwards in the console output.
 
-  Python mode (the dropdown shows "Python"):
-      exec(open(r"<path-to-repo>/tools/make_config.py").read())
+  Interactively, in the editor's Output Log console at the bottom:
 
-  Replace <path-to-repo> with the folder you cloned into, e.g.
-      py "C:/tools/SquadHeight/tools/make_config.py"
+    Cmd mode (recommended - the dropdown shows "Cmd"):
+        py "<path-to-repo>/tools/make_config.py"
+
+    Python mode (the dropdown shows "Python"):
+        exec(open(r"<path-to-repo>/tools/make_config.py").read())
+
+    Replace <path-to-repo> with the folder you cloned into, e.g.
+        py "C:/tools/SquadHeight/tools/make_config.py"
 
 Review the output before running the batch: for each map it picks the base
 art level (the one named like its folder, then GEO/master variants),
@@ -117,6 +128,42 @@ def rank_candidate(pkg):
     return (score, len(name), pkg)
 
 
+def _ensure_assets_scanned(registry):
+    """
+    Make sure the asset registry is fully populated before we query it.
+
+    In the interactive editor the initial scan finished long ago, so this is
+    a no-op. In the -run=pythonscript commandlet the startup scan can still be
+    in flight when this script runs (unlike batch_export.py, which only hits
+    the registry AFTER load_map gives it time): a naive get_assets() then
+    returns a partial list and silently drops maps - typically the plugin
+    roots (/Al_Basrah/ etc.) that get scanned late, which would land them in
+    the "unmatched" list for no real reason.
+
+    Force the map roots scanned synchronously, then let any background scan
+    finish. Every call is best-effort - the registry API surface varies
+    across engine versions, same as the ARFilter fallback below.
+    """
+    roots = ["/Game/Maps"] + [r.rstrip("/") for r in PREFERRED_ROOTS.values()]
+    try:
+        registry.scan_paths_synchronous(roots, True)
+    except Exception as exc:
+        unreal.log_warning("[SquadHeight] scan_paths_synchronous(%s) failed: %s"
+                           % (roots, exc))
+    # Let any still-running full scan complete (covers future plugin roots not
+    # in PREFERRED_ROOTS). wait_for_completion is cheap when already done;
+    # search_all_assets(True) is the heavier fallback if it's unavailable.
+    for meth, args in (("wait_for_completion", ()), ("search_all_assets", (True,))):
+        fn = getattr(registry, meth, None)
+        if fn is None:
+            continue
+        try:
+            fn(*args)
+            return
+        except Exception:
+            continue
+
+
 def find_world_assets():
     """
     All World asset package names that live in a Maps folder - both the
@@ -124,6 +171,7 @@ def find_world_assets():
     /Al_Basrah/Maps, /Harju/Maps, /BlackCoast/Maps, /SanxianIslands/Maps.
     """
     registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    _ensure_assets_scanned(registry)
     ar_filter = None
     try:  # UE5.1+: class paths
         ar_filter = unreal.ARFilter(

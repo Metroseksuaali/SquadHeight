@@ -252,13 +252,19 @@ lets you sanity-check the output before the real export.
 
 ## Batch / headless export
 
-1. Generate `tools/maps_config.json` by running `tools/make_config.py` in the
-   editor's Python console (Cmd mode: `py ".../tools/make_config.py"`) — it
-   scans the SDK's map assets and pairs them with the SquadCalc bounds.
-   Review its picks, or copy `tools/maps_config.example.json` and fill in
-   levels by hand.
-2. Copy `settings.example.bat` to `settings.bat` and edit the paths (editor
+1. Copy `settings.example.bat` to `settings.bat` and edit the paths (editor
    binary and `.uproject`). `settings.bat` stays out of the repo.
+2. Generate `tools/maps_config.json` — it scans the SDK's map assets and pairs
+   them with the SquadCalc bounds. Two ways, your choice:
+   * **Headless:** run `run_make_config.bat` (reuses `settings.bat`). Nothing
+     is loaded, so it can't OOM and needs no relaunch loop — one editor run.
+     The chosen level for each map (and its alternatives) is printed to the
+     log, so you can still review the picks afterwards.
+   * **In the editor:** run `tools/make_config.py` in the Python console
+     (Cmd mode: `py ".../tools/make_config.py"`).
+
+   Either way, review its picks — or copy `tools/maps_config.example.json` and
+   fill in levels by hand.
 3. Run `run_batch_export.bat`. Maps are exported one by one; failures don't
    stop the batch and everything is summarized in `output/batch_report.json`.
    Master levels that keep their content in streaming sublevels are handled
@@ -296,9 +302,10 @@ Then, two small edits and a re-run:
    [tools/make_config.py](tools/make_config.py). If the names already match,
    skip this.
 
-3. **Regenerate and export.** Run `make_config.py` in the editor (it finds the
-   new World asset automatically, across `/Game/Maps` and any plugin content
-   roots), skim that its pick is the real playable level, then run
+3. **Regenerate and export.** Run `make_config.py` (headless via
+   `run_make_config.bat`, or in the editor — it finds the new World asset
+   automatically, across `/Game/Maps` and any plugin content roots), skim that
+   its pick is the real playable level, then run
    `run_batch_export.bat`. The new map exports alongside the rest.
 
 What's handled for you with no extra code: streaming sublevels are attached

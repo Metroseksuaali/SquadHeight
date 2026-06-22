@@ -1,0 +1,498 @@
+diff --git a/src/js/squadHeightmapHD.js b/src/js/squadHeightmapHD.js
+new file mode 100644
+index 0000000..800aacf
+--- /dev/null
++++ b/src/js/squadHeightmapHD.js
+@@ -0,0 +1,167 @@
++/*
++ * Full-resolution (1 m) surface heightmap, decoded from SquadHeight's 16-bit
++ * grayscale PNG export. Heights in meters = pixel value * png_meters_per_unit
++ * (from hd_meta.json), min-normalized like the 500x500 JSON grid.
++ *
++ * Loaded lazily and entirely optional: when the files are missing (404) the
++ * consumer keeps using the coarse 500 grid. Decoding is hand-rolled
++ * (DecompressionStream + PNG unfiltering) to avoid a new dependency.
++ *
++ * DATA SOURCE: the per-map files this fetches —
++ *   ${API_URL}<mapURL>heightmap_hd.png   (16-bit grayscale, full-res surface)
++ *   ${API_URL}<mapURL>hd_meta.json       (georeference incl. png_meters_per_unit)
++ * are NOT bundled with SquadCalc. Get them from the SquadHeight project:
++ *   https://github.com/Metroseksuaali/SquadHeight  (Releases ->
++ *   heightmap_images_16bit_png.zip for the PNGs; each map's meta.json ships
++ *   alongside its export). Host them under your map data path, or stage them
++ *   locally with squadcalc-test/stage_heightmaps.py (copies heightmap.png ->
++ *   heightmap_hd.png and meta.json -> hd_meta.json per map). Without them the
++ *   range fan silently falls back to the bundled 500x500 heightmap.
++ */
++
++/**
++ * Decode a non-interlaced 16-bit grayscale PNG into a Uint16Array.
++ * @param {ArrayBuffer} buf - raw PNG bytes
++ * @returns {Promise<{width: number, height: number, data: Uint16Array}>}
++ */
++async function decodePng16(buf) {
++    const dv = new DataView(buf);
++    let off = 8; // skip PNG signature
++    let width = 0, height = 0;
++    const idat = [];
++
++    while (off + 12 <= buf.byteLength) {
++        const len = dv.getUint32(off);
++        const type = String.fromCharCode(dv.getUint8(off + 4), dv.getUint8(off + 5),
++                                         dv.getUint8(off + 6), dv.getUint8(off + 7));
++        if (type === "IHDR") {
++            width = dv.getUint32(off + 8);
++            height = dv.getUint32(off + 12);
++            const bitDepth = dv.getUint8(off + 16);
++            const colorType = dv.getUint8(off + 17);
++            const interlace = dv.getUint8(off + 20);
++            if (bitDepth !== 16 || colorType !== 0 || interlace !== 0) {
++                throw new Error(`expected non-interlaced 16-bit grayscale PNG, got depth ${bitDepth} color ${colorType} interlace ${interlace}`);
++            }
++        } else if (type === "IDAT") {
++            idat.push(new Uint8Array(buf, off + 8, len).slice());
++        } else if (type === "IEND") {
++            break;
++        }
++        off += 12 + len;
++    }
++    if (!width || idat.length === 0) throw new Error("malformed PNG");
++
++    // IDAT is one zlib stream split across chunks.
++    const ds = new DecompressionStream("deflate");
++    const raw = new Uint8Array(
++        await new Response(new Blob(idat).stream().pipeThrough(ds)).arrayBuffer());
++
++    // Undo per-scanline filters (bpp = 2 bytes, grayscale 16-bit).
++    const bpp = 2;
++    const stride = width * bpp;
++    const out = new Uint16Array(width * height);
++    let pos = 0;
++    let prev = new Uint8Array(stride);
++    let cur = new Uint8Array(stride);
++    for (let y = 0; y < height; y++) {
++        const filter = raw[pos++];
++        cur.set(raw.subarray(pos, pos + stride));
++        pos += stride;
++        if (filter === 1) {
++            for (let i = bpp; i < stride; i++) cur[i] = (cur[i] + cur[i - bpp]) & 255;
++        } else if (filter === 2) {
++            for (let i = 0; i < stride; i++) cur[i] = (cur[i] + prev[i]) & 255;
++        } else if (filter === 3) {
++            for (let i = 0; i < stride; i++) {
++                const a = i >= bpp ? cur[i - bpp] : 0;
++                cur[i] = (cur[i] + ((a + prev[i]) >> 1)) & 255;
++            }
++        } else if (filter === 4) {
++            for (let i = 0; i < stride; i++) {
++                const a = i >= bpp ? cur[i - bpp] : 0;
++                const b = prev[i];
++                const c = i >= bpp ? prev[i - bpp] : 0;
++                const p = a + b - c;
++                const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
++                cur[i] = (cur[i] + (pa <= pb && pa <= pc ? a : (pb <= pc ? b : c))) & 255;
++            }
++        } else if (filter !== 0) {
++            throw new Error(`unknown PNG filter ${filter}`);
++        }
++        const rowBase = y * width;
++        for (let x = 0; x < width; x++) {
++            out[rowBase + x] = (cur[x * bpp] << 8) | cur[x * bpp + 1]; // big-endian
++        }
++        const swap = prev; prev = cur; cur = swap;
++    }
++    return { width, height, data: out };
++}
++
++
++export default class SquadHeightmapHD {
++
++    /**
++     * @param {squadMinimap} map - kicks off the async load immediately
++     */
++    constructor(map) {
++        this.map = map;
++        this.mapURL = map.activeMap.mapURL;
++        this.ready = false;
++        this.failed = false;
++        this._onReady = [];
++        this._load();
++    }
++
++    /** Register a callback fired once when loading settles (ready or failed). */
++    whenSettled(cb) {
++        if (this.ready || this.failed) cb();
++        else this._onReady.push(cb);
++    }
++
++    async _load() {
++        const base = `${process.env.API_URL}${this.mapURL}`;
++        try {
++            const t0 = performance.now();
++            const [metaResp, pngResp] = await Promise.all([
++                fetch(`${base}hd_meta.json`),
++                fetch(`${base}heightmap_hd.png`),
++            ]);
++            if (!metaResp.ok || !pngResp.ok) throw new Error("no HD heightmap staged");
++            const meta = await metaResp.json();
++            const png = await decodePng16(await pngResp.arrayBuffer());
++            this.metersPerUnit = meta.png_meters_per_unit;
++            this.width = png.width;
++            this.height = png.height;
++            this.data = png.data;
++            this.ready = true;
++            console.debug(`[heightmapHD] ${this.mapURL} ${png.width}x${png.height} in ${(performance.now() - t0).toFixed(0)} ms`);
++        } catch (e) {
++            this.failed = true;
++            console.debug(`[heightmapHD] falling back to 500 grid: ${e.message}`);
++        }
++        this._onReady.forEach((cb) => cb());
++        this._onReady = [];
++    }
++
++    /**
++     * Bilinear surface height (meters) at a map latlng. Same square mapping
++     * as the 500 grid: the image spans the full [0,pixelSize] map square.
++     */
++    sample(lat, lng) {
++        const px = this.map.pixelSize;
++        let row = (-lat / px) * (this.height - 1);
++        let col = (lng / px) * (this.width - 1);
++        if (row < 0) row = 0; else if (row > this.height - 1) row = this.height - 1;
++        if (col < 0) col = 0; else if (col > this.width - 1) col = this.width - 1;
++        const r0 = Math.min(Math.floor(row), this.height - 2);
++        const c0 = Math.min(Math.floor(col), this.width - 2);
++        const fr = row - r0;
++        const fc = col - c0;
++        const d = this.data, w = this.width, o = r0 * w + c0;
++        return (d[o] * (1 - fr) * (1 - fc)
++              + d[o + 1] * (1 - fr) * fc
++              + d[o + w] * fr * (1 - fc)
++              + d[o + w + 1] * fr * fc) * this.metersPerUnit;
++    }
++}
+diff --git a/src/js/squadMarker.js b/src/js/squadMarker.js
+index 3e3adb8..97bf61c 100644
+--- a/src/js/squadMarker.js
++++ b/src/js/squadMarker.js
+@@ -3,6 +3,7 @@ import "./libs/leaflet-visual-click.js";
+ import { Marker, Circle, CircleMarker, Popup, Polygon, Icon } from "leaflet";
+ import i18next from "i18next";
+ import { sendMarkerData } from "./squadCalcAPI.js";
++import SquadRangeFan from "./squadRangeFan.js";
+ import { v4 as uuidv4 } from "uuid";
+ 
+ 
+@@ -148,6 +149,10 @@ export const squadWeaponMarker = squadMarker.extend({
+             this.rangeMarker.setStyle({opacity: 0});
+         }
+ 
++        // Terrain-aware reachability overlay (local SquadHeight experiment)
++        this.rangeFan = new SquadRangeFan(this.map, this);
++        this.rangeFan.update();
++
+         // Custom events handlers
+         this.on("click", this._handleClick, this);
+         this.on("drag", this._handleDrag, this);
+@@ -228,7 +233,8 @@ export const squadWeaponMarker = squadMarker.extend({
+             this.rangeMarker.setStyle(this.maxDistCircleOn);
+             if (this.precisionRangeMarker) this.precisionRangeMarker.remove();
+         }
+-        
++
++        if (this.rangeFan) this.rangeFan.update();
+         this.updateIcon();
+     },
+ 
+@@ -463,6 +469,9 @@ export const squadWeaponMarker = squadMarker.extend({
+         // Mini-circle and position appears on dragstart
+         this.miniCircle.setStyle({opacity: 1});
+         if (App.userSettings.weaponDrag) { this.posPopUp.openOn(this.map); }
++
++        // Recomputing the fan on every drag frame would be too slow
++        if (this.rangeFan) this.rangeFan.clear();
+     },
+ 
+     _handleDragEnd: function (broadcast = true) {
+@@ -497,6 +506,8 @@ export const squadWeaponMarker = squadMarker.extend({
+             this.updateWeaponMaxRange();
+         }
+ 
++        if (this.rangeFan) this.rangeFan.update();
++
+         // FOB range / mini-circle and position disapear on dragend
+         this.fobCircle.setStyle({opacity: 0});
+         this.miniCircle.setStyle({opacity: 0});
+@@ -547,6 +558,7 @@ export const squadWeaponMarker = squadMarker.extend({
+         this.fobCircle.removeFrom(this.map.markersGroup).remove();
+         this.posPopUp.removeFrom(this.map.markersGroup).remove();
+         if (this.precisionRangeMarker) { this.precisionRangeMarker.remove(); }
++        if (this.rangeFan) { this.rangeFan.clear(); }
+         this.removeFrom(this.map.markersGroup).removeFrom(this.map.activeWeaponsMarkers);
+         this.remove();
+ 
+diff --git a/src/js/squadRangeFan.js b/src/js/squadRangeFan.js
+new file mode 100644
+index 0000000..2d4d502
+--- /dev/null
++++ b/src/js/squadRangeFan.js
+@@ -0,0 +1,259 @@
++import { App } from "../app.js";
++import { ImageOverlay } from "leaflet";
++import SquadHeightmapHD from "./squadHeightmapHD.js";
++
++/*
++ * Range fan: terrain-aware reachability overlay for a weapon marker.
++ *
++ * For every cell within range, solves the firing elevation (same parabola as
++ * squadFiringSolution.js) and walks the trajectory against the heightmap to
++ * see whether terrain or structures block the arc on the way. The result is
++ * rasterized onto a canvas (one pixel per heightmap cell) and shown as an
++ * ImageOverlay:
++ *
++ *   green  = a valid trajectory lands here
++ *   red    = in range, but the arc is masked by terrain/structures
++ *   orange = inside the weapon's minimum range / elevation limit
++ *   gray   = out of range
++ *
++ * Local experiment for the SquadHeight true-surface heightmaps (terrain +
++ * buildings). Heavy enough to only run on placement/dragend, not during drag.
++ */
++
++// Down-slope targets land beyond the flat-ground max range: scan farther and
++// let the solver mark the tail as out-of-range.
++const SCAN_FACTOR = 1.25;
++// Tolerance (m) for the surface grazing the arc, absorbs sampling noise.
++const EPSILON = 0.01;
++
++const NOT_EVALUATED = 0, REACHABLE = 1, MASKED = 2, TOO_CLOSE = 3, OUT_OF_RANGE = 4;
++
++// RGBA per result code
++const COLORS = {
++    [REACHABLE]: [26, 204, 51, 90],
++    [MASKED]: [217, 26, 26, 110],
++    [TOO_CLOSE]: [242, 166, 26, 110],
++    [OUT_OF_RANGE]: [80, 80, 80, 45],
++};
++
++export default class SquadRangeFan {
++
++    constructor(map, weaponMarker) {
++        this.map = map;
++        this.marker = weaponMarker;
++        this.overlay = null;
++    }
++
++    clear() {
++        if (this.overlay) {
++            this.overlay.remove();
++            this.overlay = null;
++        }
++    }
++
++    update() {
++        this.clear();
++
++        const hm = this.map.heightmap;
++        if (!hm || !Array.isArray(hm.json) || hm.json.length === 0) return;
++        const t0 = performance.now();
++
++        const grid = hm.json;
++        const N = grid.length;
++        const weapon = App.activeWeapon;
++        const G = App.gravity * weapon.gravityScale;
++        const highArc = weapon.angleType === "high";
++        const minElev = (weapon.minElevation[0] * Math.PI) / 180;
++        const maxElev = (weapon.minElevation[1] * Math.PI) / 180;
++        const minDistance = weapon.minDistance || 0;
++
++        const pos = this.marker.getLatLng();
++        const degreesPerMeter = this.map.gameToMapScale;
++        const pixelSize = this.map.pixelSize;
++        const hmScale = N / pixelSize;
++        const cellMeters = (pixelSize * this.map.mapToGameScale) / N;
++
++        // Prefer the full-res (1 m) PNG surface when staged: the 500 grid's
++        // 5-8 m cells smear building walls, which decides whole masked
++        // sectors. Loads async; recompute once it settles.
++        let hd = this.map.heightmapHD;
++        if (!hd || hd.mapURL !== this.map.activeMap.mapURL) {
++            hd = this.map.heightmapHD = new SquadHeightmapHD(this.map);
++        }
++        if (!hd.ready && !hd.failed && !this._waitingHD) {
++            this._waitingHD = true;
++            hd.whenSettled(() => {
++                this._waitingHD = false;
++                if (this.map.hasLayer(this.marker)) this.update();
++            });
++        }
++
++        // Bilinear surface sampling. The masked-area geometry is extremely
++        // sensitive to the distance of near-muzzle walls, so nearest-cell
++        // lookups (getHeight) are too coarse here.
++        const sample500 = (lat, lng) => {
++            let row = lat * -hmScale;
++            let col = lng * hmScale;
++            if (row < 0) row = 0; else if (row > N - 1) row = N - 1;
++            if (col < 0) col = 0; else if (col > N - 1) col = N - 1;
++            const r0 = Math.min(Math.floor(row), N - 2);
++            const c0 = Math.min(Math.floor(col), N - 2);
++            const fr = row - r0;
++            const fc = col - c0;
++            return grid[r0][c0] * (1 - fr) * (1 - fc)
++                 + grid[r0][c0 + 1] * (1 - fr) * fc
++                 + grid[r0 + 1][c0] * fr * (1 - fc)
++                 + grid[r0 + 1][c0 + 1] * fr * fc;
++        };
++        const sample = hd.ready ? (lat, lng) => hd.sample(lat, lng) : sample500;
++
++        // Muzzle ground. On the coarse grid: minimum of the four surrounding
++        // cells, not bilinear — a building wall smears into the adjacent
++        // street cell and bilinear would put a weapon standing next to a wall
++        // meters up that artificial slope. At 1 m resolution bilinear is fine.
++        let ground;
++        if (hd.ready) {
++            ground = hd.sample(pos.lat, pos.lng);
++        } else {
++            const mr = Math.min(Math.max(pos.lat * -hmScale, 0), N - 1);
++            const mc = Math.min(Math.max(pos.lng * hmScale, 0), N - 1);
++            const mr0 = Math.min(Math.floor(mr), N - 2);
++            const mc0 = Math.min(Math.floor(mc), N - 2);
++            ground = Math.min(grid[mr0][mc0], grid[mr0][mc0 + 1],
++                              grid[mr0 + 1][mc0], grid[mr0 + 1][mc0 + 1]);
++        }
++
++        const padding = parseFloat(this.marker.heightPadding) || 0;
++        const muzzle = ground + padding + weapon.heightOffset;
++
++        const maxRange = weapon.getMaxDistance() * SCAN_FACTOR;
++        const step = cellMeters;
++        const n = Math.ceil(maxRange / step);
++        const nAz = Math.ceil((2 * Math.PI * maxRange) / step);
++
++        // Walls right next to the muzzle decide whole masked sectors, and the
++        // first regular sample is already a full cell out — probe the first
++        // two cells at quarter-cell spacing as additional obstacles.
++        const nearRs = [];
++        for (let r = step / 4; r < 2 * step; r += step / 4) nearRs.push(r);
++
++        // best (lowest) result code per heightmap cell, 0 = untouched
++        const codes = new Uint8Array(N * N);
++        const h = new Float64Array(n + 1);     // surface height relative to muzzle
++        const nearH = new Float64Array(nearRs.length);
++        const cellIdx = new Int32Array(n + 1); // raster index per sample
++
++        for (let a = 0; a < nAz; a++) {
++            const ang = (2 * Math.PI * a) / nAz;
++            const dLat = Math.cos(ang) * degreesPerMeter;
++            const dLng = Math.sin(ang) * degreesPerMeter;
++
++            // Sample the surface along the ray until it leaves the map.
++            let m = 0;
++            for (let i = 1; i <= n; i++) {
++                const lat = pos.lat + i * step * dLat;
++                const lng = pos.lng + i * step * dLng;
++                if (lat > 0 || lat < -pixelSize || lng < 0 || lng > pixelSize) break;
++                let row = Math.round(lat * -hmScale);
++                let col = Math.round(lng * hmScale);
++                if (row > N - 1) row = N - 1;
++                if (col > N - 1) col = N - 1;
++                h[i] = sample(lat, lng) - muzzle;
++                cellIdx[i] = row * N + col;
++                m = i;
++            }
++            for (let q = 0; q < nearRs.length; q++) {
++                const lat = pos.lat + nearRs[q] * dLat;
++                const lng = pos.lng + nearRs[q] * dLng;
++                nearH[q] = (lat > 0 || lat < -pixelSize || lng < 0 || lng > pixelSize)
++                    ? -Infinity : sample(lat, lng) - muzzle;
++            }
++
++            // Classify every cell along this ray as a potential impact point.
++            for (let i = 1; i <= m; i++) {
++                const R = i * step;          // horizontal distance to this cell
++                let code;
++                if (R < minDistance) {
++                    code = TOO_CLOSE;
++                } else {
++                    // Firing solution: same closed-form elevation as
++                    // squadFiringSolution.js getElevation(). The discriminant
++                    // going negative means the target is simply out of reach;
++                    // the +/- root picks the high or low arc. h[i] is the
++                    // target's height above the muzzle.
++                    const v = weapon.getVelocity(R);
++                    const v2 = v * v;
++                    const disc = v2 * v2 - G * (G * R * R + 2 * h[i] * v2);
++                    if (disc < 0) {
++                        code = OUT_OF_RANGE;
++                    } else {
++                        const root = Math.sqrt(disc);
++                        const elev = Math.atan2(v2 + (highArc ? root : -root), G * R);
++                        if (elev < minElev || elev > maxElev) {
++                            // Solution exists but the barrel can't be aimed there.
++                            code = OUT_OF_RANGE;
++                        } else {
++                            // The projectile flies the parabola
++                            //   z(r) = r*tan(elev) - k*r^2,  k = G / (2 (v cos)^2)
++                            // (height above the muzzle at horizontal distance r).
++                            // The shot is masked if the surface reaches that arc
++                            // anywhere before the target.
++                            const tan = Math.tan(elev);
++                            const cosE = Math.cos(elev);
++                            const k = G / (2 * v2 * cosE * cosE);
++                            code = REACHABLE;
++                            // Near-muzzle obstacles first (the quarter-cell
++                            // probes): a wall right next to the tube blocks the
++                            // whole sector and is missed by the full-cell samples.
++                            for (let q = 0; q < nearRs.length; q++) {
++                                const rq = nearRs[q];
++                                if (rq < R && nearH[q] >= rq * tan - k * rq * rq - EPSILON) {
++                                    code = MASKED;
++                                    break;
++                                }
++                            }
++                            // Then the regular samples between muzzle and target.
++                            if (code === REACHABLE) {
++                                for (let j = 1; j < i; j++) {
++                                    const rj = j * step;
++                                    if (h[j] >= rj * tan - k * rj * rj - EPSILON) {
++                                        code = MASKED;
++                                        break;
++                                    }
++                                }
++                            }
++                        }
++                    }
++                }
++                // Several rays cross one cell; keep the most permissive verdict
++                // (codes are ordered REACHABLE < MASKED < ... so lower wins).
++                const idx = cellIdx[i];
++                if (codes[idx] === NOT_EVALUATED || code < codes[idx]) codes[idx] = code;
++            }
++        }
++
++        // Rasterize codes to a canvas, one pixel per heightmap cell.
++        const canvas = document.createElement("canvas");
++        canvas.width = N;
++        canvas.height = N;
++        const ctx = canvas.getContext("2d");
++        const img = ctx.createImageData(N, N);
++        const px = img.data;
++        for (let i = 0; i < codes.length; i++) {
++            const color = COLORS[codes[i]];
++            if (!color) continue;
++            const o = i * 4;
++            px[o] = color[0];
++            px[o + 1] = color[1];
++            px[o + 2] = color[2];
++            px[o + 3] = color[3];
++        }
++        ctx.putImageData(img, 0, 0);
++
++        this.overlay = new ImageOverlay(canvas.toDataURL(), this.map.imageBounds, {
++            interactive: false,
++        }).addTo(this.map);
++
++        console.debug(`[rangefan] ${weapon.name} ${nAz} rays in ${(performance.now() - t0).toFixed(0)} ms`);
++    }
++}
