@@ -84,18 +84,20 @@ without you babysitting the editor. Do this once per SDK/map update.
 
 ### What you'll see while it runs
 
-Progress is printed live — you are never left guessing:
+The headless `.bat` keeps the console window minimal on purpose — engine
+asset-load warnings and the rest of Unreal's own logging are not mirrored
+there, only into a dated file under `logs/` next to this repo (full detail if
+something needs debugging - no digging through the UE project's own
+`Saved/Logs`). What you do see live in the console:
 
-* **Per map:** a header `===== [3/26] Chora =====` as each one starts, and its
-  duration when it finishes.
-* **Within a map** (the scan takes minutes at 1 m): a line every 25 rows, e.g.
-  `row 1200/4065  (46000 traces/s, ETA 4m02s)` — current row, trace rate and
-  estimated time left.
+* **Per map:** `Exporting: <level> (3/26)` as each one starts.
+* **Within a map** (the scan takes minutes at 1 m): a single self-updating
+  progress bar, e.g. `[#######-----------] row 1200/4065  29.5%  46000 tr/s
+  ETA 4m02s` — redrawn in place rather than stacking new lines.
 * **At the end:** `Batch finished: 24/26 ok in 446 s` plus a per-map summary.
 
-In the headless `.bat` these stream in the console window (and into the
-project's `Saved/Logs`). If you instead run a single map from inside the open
-editor, you also get a graphical progress bar with a **Cancel** button.
+If you instead run a single map from inside the open editor, you also get a
+graphical progress bar with a **Cancel** button.
 
 ## Read first — what the values mean at the edges
 

@@ -1,12 +1,13 @@
 """
 Package the exported heightmaps into release assets for GitHub Releases.
 
-Produces four zips under output/_release/:
+Produces five zips under output/_release/:
 
   squadcalc_heightmaps_500.zip   img/maps/<slug>/heightmap.json  (500x500
                                  drop-in tree, exactly SquadCalc's API layout)
   heightmaps_1m_fullres.zip      <Map>/heightmap.json + <Map>/meta.json
   heightmap_images_16bit_png.zip <Map>/heightmap.png (16-bit greyscale)
+  heightmap_images_8bit_png.zip  <Map>/heightmap.png (8-bit greyscale, lossier)
   heightmap_images_rb_png.zip    <Map>/heightmap.png (8-bit R+B encoded)
 
 Each zip carries a NOTES.txt. Runs outside Unreal, stdlib only.
@@ -53,13 +54,18 @@ Format
                        file named heightmap.json and currently hardcodes width
                        500, so the drop-in zip ships the 500 grid under that
                        name, laid out as img/maps/<map>/heightmap.json.
-* heightmap.png      : in the 16-bit zip, a 16-bit grayscale render for
-                       inspection; in the R+B zip, an 8-bit RGB render where
-                       height is split across the R and B channels (G is
-                       always 0) for more precision than plain 8-bit grey at
-                       the same byte depth - decode raw = 255 + R - B, then
-                       multiply by meta.json's rb_meters_per_unit. Neither
-                       PNG is the source of truth - use the JSON.
+* heightmap.png      : a preview render - this zip's name says which kind:
+                       - 16-bit zip : 16-bit grayscale, gray = height_m *
+                         meta.json's png16_meters_per_unit.
+                       - 8-bit zip  : 8-bit grayscale, smaller but lossier
+                         (256 levels) - gray = height_m * meta.json's
+                         png8_meters_per_unit.
+                       - R+B zip    : 8-bit RGB, NOT grayscale - height is
+                         split across the R and B channels (G is always 0)
+                         for ~511 levels at the same byte depth as the 8-bit
+                         zip - decode raw = 255 + R - B (0..510), then
+                         height_m = raw * meta.json's rb_meters_per_unit.
+                       No PNG is the source of truth - use the JSON.
 * meta.json          : world bounds, resolution, z-offset and PNG scaling.
 
 Reading a value: row index runs over the minimap's vertical axis, column over
@@ -98,6 +104,7 @@ def build():
     z500 = os.path.join(DEST, "squadcalc_heightmaps_500.zip")
     zfull = os.path.join(DEST, "heightmaps_1m_fullres.zip")
     zpng = os.path.join(DEST, "heightmap_images_16bit_png.zip")
+    zpng8 = os.path.join(DEST, "heightmap_images_8bit_png.zip")
     zpngrb = os.path.join(DEST, "heightmap_images_rb_png.zip")
 
     with zipfile.ZipFile(z500, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
@@ -133,6 +140,16 @@ def build():
                 n += 1
         print("heightmap_images_16bit_png.zip : %d maps" % n)
 
+    with zipfile.ZipFile(zpng8, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        add_notes(zf)
+        n = 0
+        for name, d in maps():
+            png = os.path.join(d, "heightmap_8bit.png")
+            if os.path.isfile(png):
+                zf.write(png, "%s/heightmap.png" % name)
+                n += 1
+        print("heightmap_images_8bit_png.zip : %d maps" % n)
+
     with zipfile.ZipFile(zpngrb, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         add_notes(zf)
         n = 0
@@ -143,7 +160,7 @@ def build():
                 n += 1
         print("heightmap_images_rb_png.zip : %d maps" % n)
 
-    for p in (z500, zfull, zpng, zpngrb):
+    for p in (z500, zfull, zpng, zpng8, zpngrb):
         print("  %8.1f MB  %s" % (os.path.getsize(p) / 1048576, os.path.basename(p)))
 
 

@@ -20,8 +20,15 @@ if not exist "%SQUADHEIGHT_CONFIG%" (
     exit /b 2
 )
 
+REM Sortable timestamp for the run's log file (locale-independent, unlike
+REM %DATE%/%TIME% which vary by Windows regional settings).
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss"') do set "TS=%%i"
+set "LOGDIR=%~dp0logs"
+if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+set "RUNLOG=%LOGDIR%\export_%TS%.log"
+
 echo [SquadHeight] Starting headless batch export...
-echo [SquadHeight] Log output follows (also written to the project's Saved\Logs).
+echo [SquadHeight] Full engine/script log: %RUNLOG%
 
 REM Notes:
 REM  * -run=pythonscript executes the script via the Python commandlet.
@@ -40,6 +47,25 @@ REM  * Set SQUADHEIGHT_ONE_MAP=1 to export ONE map per editor run (fresh
 REM    process every map). Slower, but immune to the silent collision loss
 REM    seen in long multi-map sessions (Tallil exported with ~2% of its
 REM    structures as map ~22 of one session). Recommended for final exports.
+REM  * UnrealEditor-Cmd.exe mirrors its entire log (thousands of asset-load
+REM    lines) to the console by default, with no flag to filter that down to
+REM    just errors without also filtering its log output entirely (a
+REM    verbosity threshold applies before a line is written ANYWHERE, not
+REM    just to the console). So instead the editor's own stdout/stderr are
+REM    redirected to %RUNLOG% below (appended, so every relaunch attempt in
+REM    one batch run lands in the same dated file - no digging through the
+REM    UE project's own Saved\Logs). batch_export.py and export_heightmap.py
+REM    write their own status (which map, a live progress bar, the final
+REM    summary, the per-checkpoint scan progress) BOTH to the console device
+REM    directly (bypassing this redirect - see export_heightmap._console_write)
+REM    AND to fd 1 (os.write(1, ...) - see export_heightmap._log_write), which
+REM    IS this same redirected file: sys.stdout inside the editor's embedded
+REM    Python is not reliably wired to it, and a second open() of %RUNLOG%
+REM    collides with the handle this redirect already holds, so fd 1 is the
+REM    one mechanism that actually reaches it. %RUNLOG% therefore gets
+REM    everything, including a crash - the loop below already detects one
+REM    without needing the editor's own console output: it relaunches
+REM    whenever the editor exits without a finished report.
 set "REPORT=%~dp0output\batch_report.json"
 if exist "%REPORT%" del "%REPORT%"
 set ATTEMPT=0
@@ -52,7 +78,7 @@ if %ATTEMPT% GTR 40 (
 )
 echo [SquadHeight] === editor run %ATTEMPT% ===
 "%UE_CMD%" "%UPROJECT%" -run=pythonscript -script="%~dp0tools\batch_export.py" ^
-    -stdout -FullStdOutLogOutput -Unattended -NoSplash -NoSound -NoLiveCoding
+    -Unattended -NoSplash -NoSound -NoLiveCoding >>"%RUNLOG%" 2>&1
 set "RC=%ERRORLEVEL%"
 if exist "%REPORT%" goto done
 echo [SquadHeight] Editor exited without a final report (exit code %RC%) - resuming...
@@ -63,6 +89,6 @@ if "%RC%"=="0" (
     echo [SquadHeight] Batch export finished OK.
 ) else (
     echo [SquadHeight] Batch export finished with failures (exit code %RC%^).
-    echo [SquadHeight] Check output above and output\batch_report.json.
+    echo [SquadHeight] Check output above, output\batch_report.json and %RUNLOG%.
 )
 exit /b %RC%

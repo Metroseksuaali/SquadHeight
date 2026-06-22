@@ -8,8 +8,20 @@ export_heightmap.py). Two ways to launch it:
 1. Headless (recommended for full re-exports after a map update):
        UnrealEditor-Cmd.exe <Project.uproject> -run=pythonscript
            -script="<path-to-repo>/tools/batch_export.py"
-           -stdout -FullStdOutLogOutput -Unattended -NoSplash
+           -Unattended -NoSplash
    (see ../run_batch_export.bat - edit the paths at the top of that file).
+   UnrealEditor-Cmd.exe mirrors its entire log (thousands of asset-load
+   lines) to whatever stdout is, with no flag to filter that to just errors
+   without also filtering the log itself - so the .bat redirects the
+   editor's stdout/stderr into a dated file under logs/ instead of the
+   console. This script's own status (current map, progress bar, summary)
+   is written via export_heightmap._status(), which shows it live on the
+   console device (bypassing that redirect) AND writes the same line to fd 1
+   via os.write() - which IS the file the redirect points at, inherited from
+   the parent process (sys.stdout in the editor's embedded Python is not
+   reliably wired to it, so this does not go through sys.stdout) - so the
+   log has the same narrative you saw live, plus everything else (asset
+   warnings, a crash, ...) that didn't fit on screen.
    UE4.27 uses UE4Editor-Cmd.exe instead of UnrealEditor-Cmd.exe.
 
 2. Interactively, from the editor Python console:
@@ -272,7 +284,8 @@ def main():
     t_batch = time.time()
     for i, entry in enumerate(maps):
         level = entry["level"]
-        name = entry.get("name")  # None -> world name
+        name = entry.get("name")  # None -> world name (only known after load)
+        display_name = name or level.rsplit("/", 1)[-1]
         overrides = dict(defaults)
         # Per-map overrides win over defaults; nested "trace" dicts merge.
         for k, v in entry.get("overrides", {}).items():
@@ -287,15 +300,23 @@ def main():
 
         # Resume support: skip maps that already have a finished export
         # (delete the map's output folder, or set SQUADHEIGHT_FORCE=1, to redo).
-        done_marker = os.path.join(output_root, name or level.rsplit("/", 1)[-1],
-                                   "meta.json")
+        done_marker = os.path.join(output_root, display_name, "meta.json")
         if os.path.isfile(done_marker) and not os.environ.get("SQUADHEIGHT_FORCE"):
             unreal.log("[SquadHeight] ===== [%d/%d] %s — already exported, "
                        "skipping =====" % (i + 1, len(maps), level))
-            report.append({"level": level, "status": "skipped", "seconds": 0})
+            export_heightmap._status(
+                "\nSkipping (already exported): %s (%d/%d)\n  level: %s\n"
+                % (display_name, i + 1, len(maps), level))
+            report.append({"level": level, "name": display_name,
+                            "status": "skipped", "seconds": 0})
             continue
 
         unreal.log("[SquadHeight] ===== [%d/%d] %s =====" % (i + 1, len(maps), level))
+        # _status() also prints this live on the console (see module
+        # docstring) and into the run's dated log file - unreal.log() alone
+        # reaches neither, since the editor's stdout/stderr are redirected.
+        export_heightmap._status(
+            "\nExporting: %s (%d/%d)\n  level: %s\n" % (display_name, i + 1, len(maps), level))
         t_map = time.time()
         try:
             if not _load_level(level):
@@ -305,15 +326,21 @@ def main():
             )
             if out_dir is None:
                 raise RuntimeError("export cancelled")
+            # out_dir's basename is the actually-resolved name (matters when
+            # "name" wasn't set in the config and export_heightmap fell back
+            # to the world name, which display_name only guessed at).
             report.append({
-                "level": level, "status": "ok", "output": out_dir,
+                "level": level, "name": os.path.basename(out_dir.rstrip("/\\")),
+                "status": "ok", "output": out_dir,
                 "seconds": round(time.time() - t_map, 1),
             })
         except Exception as exc:
             unreal.log_error("[SquadHeight] FAILED %s: %s" % (level, exc))
             unreal.log_error(traceback.format_exc())
+            # Short form on the console - full traceback is in Saved/Logs only.
+            export_heightmap._status("FAILED: %s: %s\n" % (display_name, exc))
             report.append({
-                "level": level, "status": "failed", "error": str(exc),
+                "level": level, "name": display_name, "status": "failed", "error": str(exc),
                 "seconds": round(time.time() - t_map, 1),
             })
             # Keep going - one broken map should not kill the whole batch.
@@ -328,18 +355,19 @@ def main():
 
         if one_map and report and report[-1]["status"] in ("ok", "failed"):
             unreal.log("[SquadHeight] one-map mode: exiting after %s; "
-                       "the relaunch loop continues with the next map." % level)
+                       "the relaunch loop continues with the next map." % display_name)
             finished_early = True
             break
 
     # Summary + machine-readable report for CI-style usage.
     ok = sum(1 for r in report if r["status"] in ("ok", "skipped"))
-    unreal.log("[SquadHeight] Batch finished: %d/%d ok in %.0f s"
-               % (ok, len(report), time.time() - t_batch))
+    summary = "Batch finished: %d/%d ok in %.0f s" % (ok, len(report), time.time() - t_batch)
+    unreal.log("[SquadHeight] " + summary)
+    export_heightmap._status("\n" + summary + "\n")
     for r in report:
-        line = "[SquadHeight]   %-8s %s (%.0fs)" % (
-            r["status"].upper(), r["level"], r["seconds"])
-        (unreal.log if r["status"] != "failed" else unreal.log_error)(line)
+        line = "  %-8s %s (%.0fs)" % (r["status"].upper(), r["name"], r["seconds"])
+        (unreal.log if r["status"] != "failed" else unreal.log_error)("[SquadHeight]" + line)
+        export_heightmap._status(line + "\n")
 
     if not finished_early:
         if not os.path.isdir(output_root):
