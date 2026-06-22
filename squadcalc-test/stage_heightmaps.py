@@ -51,6 +51,17 @@ def main():
         size_kb = os.path.getsize(dst) / 1024.0
         print("  staged %-14s -> img/maps/%s/heightmap.json (%.0f KB)"
               % (name, slug, size_kb))
+
+        # Full-res surface as 16-bit PNG + its meta, for the range-fan HD
+        # sampler (heights = pixel * png16_meters_per_unit). Optional: the
+        # front-end falls back to the 500 grid when these are missing.
+        png = os.path.join(src_dir, "heightmap_16bit.png")
+        meta = os.path.join(src_dir, "meta.json")
+        if os.path.isfile(png) and os.path.isfile(meta):
+            shutil.copyfile(png, os.path.join(dst_dir, "heightmap_hd.png"))
+            shutil.copyfile(meta, os.path.join(dst_dir, "hd_meta.json"))
+            print("         %-14s -> img/maps/%s/heightmap_hd.png (%.1f MB)"
+                  % ("", slug, os.path.getsize(png) / 1024.0 / 1024.0))
         staged += 1
 
     print("\nStaged %d heightmaps into %s" % (staged, DEST_ROOT))
