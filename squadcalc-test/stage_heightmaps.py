@@ -62,6 +62,15 @@ def main():
             shutil.copyfile(meta, os.path.join(dst_dir, "hd_meta.json"))
             print("         %-14s -> img/maps/%s/heightmap_hd.png (%.1f MB)"
                   % ("", slug, os.path.getsize(png) / 1024.0 / 1024.0))
+
+        # R+B 8-bit PNG surface. SquadCalc's dev branch fetches this as
+        # heightmap.png and decodes height = (255 + r - b) * scale[2]
+        # (~8.8 cm precision, same byte size as the 8-bit preview).
+        rbpng = os.path.join(src_dir, "heightmap_rb.png")
+        if os.path.isfile(rbpng):
+            shutil.copyfile(rbpng, os.path.join(dst_dir, "heightmap.png"))
+            print("         %-14s -> img/maps/%s/heightmap.png (%.1f MB)"
+                  % ("", slug, os.path.getsize(rbpng) / 1024.0 / 1024.0))
         staged += 1
 
     print("\nStaged %d heightmaps into %s" % (staged, DEST_ROOT))
