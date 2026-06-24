@@ -115,18 +115,26 @@ def _norm(s):
 
 
 def rank_candidate(pkg):
-    """Lower is better: folder-named level, then GEO/master/city variants."""
+    """Lower is better: folder-named level, then GEO/landscape/master variants,
+    then anything else; navmesh/profiling helpers sink to the bottom."""
     parts = pkg.split("/")
     name = parts[-1]
     n = _norm(name)
     # A level named like any directory on its path (Chora/Chora,
     # /Al_Basrah/Maps/AlBasrah_Level-ish) is the base level.
     dir_norms = {_norm(p) for p in parts[1:-1] if p}
-    if any(k in n for k in ("coop", "whitebox", "nolandscape", "playtest")):
-        score = 3  # special-purpose master variants, not the base level
+    # The navmesh and profiling siblings of a master are NOT the playable
+    # geometry, but they carry "master" in their name - so they must be demoted
+    # HERE, before the master check below, or they outrank the real terrain.
+    # (Belaya/Harju/Kohat/Kokan/Logar/Skorpo/Fallujah/Yehorivka ship no bare
+    # master, so L_000_Master_<Map>_Navmesh used to win over <Map>Landscape.)
+    if any(k in n for k in ("navmesh", "profiling", "coop", "whitebox",
+                            "nolandscape", "playtest")):
+        score = 3  # helper / special-purpose variants, never the base level
     elif n in dir_norms or n.replace("level", "") in dir_norms:
         score = 0
-    elif any(k in n for k in ("geo", "master", "city", "level")):
+    elif any(k in n for k in ("geo", "landscape", "baselayer", "master",
+                              "city", "level")):
         score = 1
     else:
         score = 2

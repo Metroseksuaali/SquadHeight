@@ -235,6 +235,72 @@ check("session log under logs/", os.path.basename(os.path.dirname(sess_path)) ==
 check("session log appends", "Session A" in sess_text and "Session B" in sess_text)
 sh_log.get().close()
 
+# ---- make_config.rank_candidate: pick the geometry level, not navmesh -------
+# Candidate lists below are the real ones captured from a make_config run.
+import make_config as mc  # noqa: E402
+
+
+def best_level(cands):
+    return sorted(cands, key=mc.rank_candidate)[0]
+
+
+# Maps whose master ships only as _Navmesh/_Profiling helpers: the real
+# geometry is a root landscape / baselayer, which must win.
+check("Belaya -> landscape, not navmesh", best_level([
+    "/Game/Maps/Belaya_Pass/Sublevels/L_000_Master_Belaya_Navmesh",
+    "/Game/Maps/Belaya_Pass/Sublevels/L_000_Master_Belaya_Profiling",
+    "/Game/Maps/Belaya_Pass/BelayaLandscape",
+    "/Game/Maps/Belaya_Pass/Sublevels/050_Cameras/L_050_Cameras_Belaya_Static",
+]) == "/Game/Maps/Belaya_Pass/BelayaLandscape")
+
+check("Skorpo -> baselayer, not navmesh", best_level([
+    "/Game/Maps/Skorpo/Sublevels/L_000_Master_Skorpo_Navmesh",
+    "/Game/Maps/Skorpo/Sublevels/L_000_Master_Skorpo_Profiling",
+    "/Game/Maps/Skorpo/Skorpo_Baselayer",
+    "/Game/Maps/Skorpo/Sublevels/050_Cameras/L_050_Cameras_Skorpo_Static",
+]) == "/Game/Maps/Skorpo/Skorpo_Baselayer")
+
+check("Fallujah -> landscape, not navmesh/vfx", best_level([
+    "/Game/Maps/Fallujah_City/Sublevels/L_000_Master_Fallujah_Navmesh",
+    "/Game/Maps/Fallujah_City/Sublevels/L_000_Master_Fallujah_Profiling",
+    "/Game/Maps/Fallujah_City/Sublevels/090_VisualFX/L_090_VisualFX_Fallujah_01",
+    "/Game/Maps/Fallujah_City/Sublevels/070_Landscape/L_070_Landscape_Fallujah_00",
+    "/Game/Maps/Fallujah_City/Sublevels/070_Landscape/L_070_Landscape_Fallujah_01",
+]).endswith("070_Landscape/L_070_Landscape_Fallujah_00"))
+
+check("Harju -> landscape, not navmesh", best_level([
+    "/Harju/Maps/Sublevels/L_000_Master_Harju_Navmesh",
+    "/Harju/Maps/Sublevels/L_000_Master_Harju_Profiling",
+    "/Harju/Maps/Harju_Landscape",
+    "/Harju/Maps/Sublevels/L_000_Master_Harju_Coop",
+]) == "/Harju/Maps/Harju_Landscape")
+
+# Maps that already picked correctly must NOT regress.
+check("AlBasrah keeps bare master", best_level([
+    "/Al_Basrah/Maps/Sublevels/L_000_Master_AlBasrah",
+    "/Al_Basrah/Maps/Sublevels/L_000_Master_AlBasrah_Navmesh",
+    "/Al_Basrah/Maps/Sublevels/L_000_Master_AlBasrah_Profiling",
+]) == "/Al_Basrah/Maps/Sublevels/L_000_Master_AlBasrah")
+
+check("Narva keeps bare master over fx/navmesh", best_level([
+    "/Game/Maps/Narva/Sublevels/L_000_Master_Narva",
+    "/Game/Maps/Narva/Sublevels/100_SoundFX/L_100_SoundFX_Narva_Master",
+    "/Game/Maps/Narva/Sublevels/L_000_Master_Narva_Navmesh",
+    "/Game/Maps/Narva/Sublevels/090_VisualFX/L_090_VisualFX_Narva_Master",
+    "/Game/Maps/Narva/Sublevels/L_000_Master_Narva_Profiling",
+]) == "/Game/Maps/Narva/Sublevels/L_000_Master_Narva")
+
+check("Anvil keeps GEO", best_level([
+    "/Game/Maps/Anvil/Anvil_GEO",
+    "/Game/Maps/Anvil/Sublevels/L_000_Master_Anvil_Navmesh",
+    "/Game/Maps/Anvil/Sublevels/050_Cameras/L_050_Cameras_Anvil_Static",
+]) == "/Game/Maps/Anvil/Anvil_GEO")
+
+check("Chora keeps folder-named", best_level([
+    "/Game/Maps/Chora/Chora",
+    "/Game/Maps/Chora/Sublevels/L_000_Master_Chora_Navmesh",
+]) == "/Game/Maps/Chora/Chora")
+
 print()
 if failures:
     print("FAILED: %d check(s): %s" % (len(failures), ", ".join(failures)))
