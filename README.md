@@ -95,10 +95,19 @@ firehose:
   `[#########---------------]  41%  row 1700/4065  46.0k traces/s  ETA 4m02s`.
 * **At the end:** `Batch finished: 24/26 ok in 7m26s` plus one line per map.
 
-Everything verbose — every detail line plus a breadcrumb of the scan timing —
-is appended to **`output/logs/squadheight_<date>.log`**, the file to open when
-a run needs troubleshooting. The engine's own full log still lands in the
-project's `Saved/Logs`. To put the raw engine firehose back on the console for
+The engine's own log (the firehose) is kept off the console: the `.bat`
+redirects it to a file. Two logs are written under `output/logs/`, and the
+runner prints both exact paths when it starts:
+
+* **`squadheight_<date>.log`** — SquadHeight's own clean+verbose log (every
+  detail line plus a breadcrumb of the scan timing). This is the file to open
+  first when a run needs troubleshooting.
+* **`engine_<tool>_<timestamp>.log`** — the raw Unreal engine log for that run
+  (the same firehose that used to scroll past). The engine also keeps its
+  usual copy in the project's `Saved/Logs`.
+
+The window stays open at the end (it ends on a `pause`) so you can read the
+summary and the log paths. To watch the raw engine log live on the console for
 deep debugging, set `SQUADHEIGHT_VERBOSE=1` before launching the `.bat`.
 
 If you instead run a single map from inside the open editor, you also get a

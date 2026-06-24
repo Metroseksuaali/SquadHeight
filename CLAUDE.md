@@ -22,11 +22,16 @@ what a working session needs that the README doesn't.
   `meta.json` (bounds/resolution/orientation/z-offset + trace stats).
   `output/logs/squadheight_<date>.log` (gitignored) — the verbose run log.
 * `tools/sh_log.py` — the headless console/log layer all three editor scripts
-  use. Two channels: a clean plain-English console (written via `os.write(1)`,
-  so it survives the runners NOT passing `-stdout`) and the verbose
-  `output/logs/` file. The `.bat`s no longer stream the engine firehose by
-  default; `SQUADHEIGHT_VERBOSE=1` restores `-stdout -FullStdOutLogOutput`
-  (and echoes `detail()` lines to the console). Engine log still in `Saved/Logs`.
+  use. Two channels: a clean plain-English console (written to `CONOUT$`, the
+  console screen buffer, which survives the runner redirecting the editor's
+  stdout to a file) and the verbose `output/logs/squadheight_<date>.log` file.
+  The `.bat`s redirect the engine firehose to `output/logs/engine_*.log`
+  (default) and `pause` at the end so the window stays open; they echo both log
+  paths up front. `SQUADHEIGHT_VERBOSE=1` instead streams the raw engine log to
+  the console (`-stdout -FullStdOutLogOutput`) and echoes `detail()` lines too.
+  Engine log also still in `Saved/Logs`. NOTE: the CONOUT$/redirect split is
+  unverified on the actual SDK build — if the console is still noisy, the build
+  may write its log via a private console handle rather than the std handle.
 * `squadcalc-test/` — local SquadCalc in Docker: serves OUR heightmaps, proxies
   everything else to production `squadcalc.app/api`. `stage_heightmaps.py`
   copies output → `heightmaps/`; `crosscheck.py` / `render_compare.py` validate

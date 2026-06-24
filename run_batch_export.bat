@@ -3,41 +3,46 @@ setlocal
 REM ============================================================================
 REM  SquadHeight - headless batch heightmap export
 REM  Machine-specific paths live in settings.bat (copy settings.example.bat).
+REM
+REM  The console shows only SquadHeight's clean phase/progress view; the
+REM  engine's own (very noisy) log is redirected to a file under output\logs.
+REM  Set SQUADHEIGHT_VERBOSE=1 to stream the raw engine log to the console.
 REM ============================================================================
+
+set "RC=0"
 
 if not exist "%~dp0settings.bat" (
     echo [SquadHeight] settings.bat not found.
     echo [SquadHeight] Copy settings.example.bat to settings.bat and edit the paths.
-    exit /b 2
+    set "RC=2" & goto :end
 )
 call "%~dp0settings.bat"
 
-if not exist "%UE_CMD%"   ( echo [SquadHeight] UE_CMD not found: %UE_CMD% & exit /b 2 )
-if not exist "%UPROJECT%" ( echo [SquadHeight] UPROJECT not found: %UPROJECT% & exit /b 2 )
+if not exist "%UE_CMD%"   ( echo [SquadHeight] UE_CMD not found: %UE_CMD%   & set "RC=2" & goto :end )
+if not exist "%UPROJECT%" ( echo [SquadHeight] UPROJECT not found: %UPROJECT% & set "RC=2" & goto :end )
 if not exist "%SQUADHEIGHT_CONFIG%" (
     echo [SquadHeight] Config not found: %SQUADHEIGHT_CONFIG%
     echo [SquadHeight] Copy tools\maps_config.example.json to tools\maps_config.json first.
-    exit /b 2
+    set "RC=2" & goto :end
 )
 
-REM Console verbosity: by default the engine's own log is NOT streamed to the
-REM console - it floods it with thousands of asset/shader/streaming lines.
-REM batch_export.py prints a clean plain-English phase + progress view instead,
-REM and the full detail is written to output\logs\squadheight_<date>.log (plus
-REM the engine's own Saved\Logs). Set SQUADHEIGHT_VERBOSE=1 (here or in
-REM settings.bat) to ALSO stream the raw engine log to the console for deep
-REM debugging.
-set "ENGINE_LOG_ARGS="
-if defined SQUADHEIGHT_VERBOSE set "ENGINE_LOG_ARGS=-stdout -FullStdOutLogOutput"
+REM Make sure the log folder exists and name a timestamped engine-log file.
+set "LOGDIR=%~dp0output\logs"
+if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%i"
+set "ENGINE_LOG=%LOGDIR%\engine_batch_%TS%.log"
+set "SH_LOG=%LOGDIR%\squadheight_%TS:~0,8%.log"
 
 echo [SquadHeight] Starting headless batch export...
-echo [SquadHeight] Clean progress shows below; full detail -^> output\logs\ and Saved\Logs.
+echo [SquadHeight] Clean progress shows below. Detailed logs are written to:
+echo [SquadHeight]     %SH_LOG%   (SquadHeight: phases + per-map detail)
+echo [SquadHeight]     %ENGINE_LOG%   (raw engine log, all editor runs appended)
+echo.
 
 REM Notes:
-REM  * -run=pythonscript executes the script via the Python commandlet.
-REM    If the editor exits immediately complaining about an unknown
-REM    commandlet, the Python Editor Script Plugin is NOT enabled in this
-REM    SDK build - see README.md "Setup".
+REM  * -run=pythonscript executes the script via the Python commandlet. If the
+REM    editor exits immediately complaining about an unknown commandlet, the
+REM    Python Editor Script Plugin is NOT enabled - see README.md "Setup".
 REM    On UE5 you can often force-enable it per-run by appending:
 REM        -EnablePlugins=PythonScriptPlugin
 REM  * Optionally append -NullRHI to run without a GPU/rendering device
@@ -58,21 +63,31 @@ set ATTEMPT=0
 set /a ATTEMPT+=1
 if %ATTEMPT% GTR 40 (
     echo [SquadHeight] Giving up after 40 editor runs without a finished report.
-    exit /b 1
+    set "RC=1" & goto :end
 )
 echo [SquadHeight] === editor run %ATTEMPT% ===
-"%UE_CMD%" "%UPROJECT%" -run=pythonscript -script="%~dp0tools\batch_export.py" ^
-    %ENGINE_LOG_ARGS% -Unattended -NoSplash -NoSound -NoLiveCoding
+if defined SQUADHEIGHT_VERBOSE (
+    "%UE_CMD%" "%UPROJECT%" -run=pythonscript -script="%~dp0tools\batch_export.py" ^
+        -stdout -FullStdOutLogOutput -Unattended -NoSplash -NoSound -NoLiveCoding
+) else (
+    "%UE_CMD%" "%UPROJECT%" -run=pythonscript -script="%~dp0tools\batch_export.py" ^
+        -Unattended -NoSplash -NoSound -NoLiveCoding >> "%ENGINE_LOG%" 2>&1
+)
 set "RC=%ERRORLEVEL%"
 if exist "%REPORT%" goto done
 echo [SquadHeight] Editor exited without a final report (exit code %RC%) - resuming...
 goto loop
 
 :done
+echo.
 if "%RC%"=="0" (
     echo [SquadHeight] Batch export finished OK.
 ) else (
     echo [SquadHeight] Batch export finished with failures (exit code %RC%^).
-    echo [SquadHeight] See output\batch_report.json and output\logs\ for detail.
+    echo [SquadHeight] See output\batch_report.json, %SH_LOG% and %ENGINE_LOG%.
 )
+
+:end
+echo.
+pause
 exit /b %RC%

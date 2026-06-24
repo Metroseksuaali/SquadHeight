@@ -10,12 +10,13 @@ asset / shader / streaming lines that bury the handful a human actually wants.
 This module gives the export scripts two clean, SEPARATE channels instead:
 
   * CONSOLE  - short plain-English "which phase is running and how far along",
-               plus one in-place progress bar. Written straight to the
-               process's real stdout file descriptor (``os.write(1, ...)``),
-               which BYPASSES the Unreal Python plugin's redirection of
-               ``sys.stdout`` to the engine log. That is what lets these lines
-               show on the .bat console even though the runners no longer pass
-               ``-stdout`` (so the engine firehose stays off the console).
+               plus one in-place progress bar. Written to the real console via
+               ``CONOUT$`` (the console's active screen buffer), which is
+               INDEPENDENT of stdout/stderr redirection. The runners redirect
+               the editor's own (very noisy) stdout to a log file, so the
+               engine firehose stays OFF the console while our clean lines
+               still appear on it. Falls back to ``os.write(1)`` then
+               ``sys.__stdout__`` when there is no console.
   * LOG FILE - every line (the console lines AND verbose ``detail`` lines)
                appended to ``<output>/logs/squadheight_<date>.log`` - the file
                you open to troubleshoot a run. The full engine log still lands
@@ -43,12 +44,15 @@ except Exception:  # pragma: no cover - exercised only outside the editor
     unreal = None
 
 
-def _utc_stamp():
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+def _stamp():
+    # Local time on purpose: this is a personal troubleshooting log you read
+    # against "when did I run it", not a distributed artifact. Local reads more
+    # naturally and keeps the filename date matching what the runner echoes.
+    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _clock():
-    return time.strftime("%H:%M:%S", time.localtime())
+    return time.strftime("%H:%M:%S")
 
 
 def fmt_duration(seconds):
@@ -94,13 +98,11 @@ class Reporter(object):
         self._bar_len = 0
         self._last_bar = 0.0
         self._last_file_progress = 0.0
-        # Is stdout a real terminal? When the .bat output is redirected to a
-        # file, \r in-place updates would just produce noise, so we fall back
-        # to occasional full lines instead.
-        try:
-            self._tty = os.isatty(1)
-        except Exception:
-            self._tty = False
+        # Console handle (CONOUT$), opened lazily: False = not tried yet,
+        # None = no console available, else an open file object. _can_inplace
+        # (computed on first progress tick) decides bar vs. plain lines.
+        self._con = False
+        self._can_inplace = None
         if log_path:
             self._open_log(log_path)
 
@@ -121,7 +123,7 @@ class Reporter(object):
     def _to_file(self, text):
         if self._fh is not None:
             try:
-                self._fh.write(_utc_stamp() + "  " + text + "\n")
+                self._fh.write(_stamp() + "  " + text + "\n")
                 self._fh.flush()
             except Exception:
                 pass
@@ -131,12 +133,39 @@ class Reporter(object):
         self._to_file("=" * 70)
 
     # --------------------------------------------------------------- console
+    def _open_console(self):
+        """
+        Lazily open a handle to the real console (CONOUT$). On Windows this is
+        the console's active screen buffer, INDEPENDENT of stdout/stderr
+        redirection - so our clean lines still reach the console window even
+        though the runner redirects the editor's own (noisy) stdout to a log
+        file. Returns an open file object, or None if there is no console.
+        """
+        if self._con is False:  # not tried yet
+            try:
+                self._con = open("CONOUT$", "w", buffering=1, errors="replace")
+            except Exception:
+                self._con = None
+        return self._con
+
+    def _has_console(self):
+        return self._open_console() is not None
+
     def _to_console(self, text, newline=True):
         """
-        Write to the real stdout fd, bypassing unreal's sys.stdout redirect.
-        Falls back to the original interpreter stdout if fd 1 is unusable.
+        Write a clean line to the console, preferring CONOUT$ (survives the
+        editor's stdout being redirected to a file by the runner). Falls back
+        to the real stdout fd, then the original interpreter stdout.
         """
         payload = text + ("\n" if newline else "")
+        con = self._open_console()
+        if con is not None:
+            try:
+                con.write(payload)
+                con.flush()
+                return
+            except Exception:
+                pass
         try:
             os.write(1, payload.encode("utf-8", "replace"))
             return
@@ -219,7 +248,16 @@ class Reporter(object):
         is_last = current >= total
         pct = int(frac * 100 + 0.5)
 
-        if self._tty:
+        # Decide once whether the destination can do in-place \r updates: a real
+        # console (CONOUT$) can even when fd 1 is redirected to a file; a plain
+        # tty can too. A pipe/file cannot, so fall back to periodic full lines.
+        if self._can_inplace is None:
+            try:
+                self._can_inplace = self._has_console() or os.isatty(1)
+            except Exception:
+                self._can_inplace = self._has_console()
+
+        if self._can_inplace:
             if is_last or (now - self._last_bar) >= min_interval:
                 width = 24
                 filled = int(width * frac + 0.5)
@@ -255,6 +293,12 @@ class Reporter(object):
             except Exception:
                 pass
             self._fh = None
+        if self._con not in (False, None):
+            try:
+                self._con.close()
+            except Exception:
+                pass
+        self._con = False
 
 
 # ============================================================================
@@ -271,7 +315,7 @@ def _repo_root():
 def _session_log_path(output_root):
     return os.path.join(
         output_root, "logs",
-        "squadheight_%s.log" % time.strftime("%Y%m%d", time.gmtime()))
+        "squadheight_%s.log" % time.strftime("%Y%m%d"))
 
 
 def _verbose_env():
