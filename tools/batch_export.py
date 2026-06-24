@@ -35,6 +35,7 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.append(_SCRIPT_DIR)
 
 import export_heightmap  # noqa: E402
+import sh_log  # noqa: E402  (clean console + log-file reporter, stdlib-only)
 
 
 def _find_config_path():
@@ -152,8 +153,8 @@ def _force_load_sublevels(level_path):
     subs = _find_sublevel_worlds(level_path)
     if not subs:
         if _landscape_count(world) == 0:
-            unreal.log_warning("[SquadHeight] no landscape AND no sublevel "
-                               "worlds found next to %s" % level_path)
+            sh_log.get().warn("no landscape AND no sublevel worlds found next "
+                              "to %s" % level_path)
         return
 
     loaded_pkgs = set()
@@ -163,7 +164,7 @@ def _force_load_sublevels(level_path):
             loaded_pkgs.add(str(lvl.get_path_name()).split(".")[0])
         loaded_known = True
     except Exception as exc:
-        unreal.log_warning("[SquadHeight] could not list loaded levels: %s" % exc)
+        sh_log.get().warn("could not list loaded levels: %s" % exc)
 
     missing = [w for w in subs if w not in loaded_pkgs]
     if _landscape_count(world) == 0 or loaded_known:
@@ -176,8 +177,8 @@ def _force_load_sublevels(level_path):
 
     if not to_add:
         return
-    unreal.log("[SquadHeight] attaching %d missing sublevels (of %d found)..."
-               % (len(to_add), len(subs)))
+    sh_log.get().detail("attaching %d missing sublevels (of %d found)..."
+                        % (len(to_add), len(subs)))
     added = 0
     for pkg in to_add:
         try:
@@ -185,14 +186,13 @@ def _force_load_sublevels(level_path):
                 world, pkg, unreal.LevelStreamingAlwaysLoaded)
             added += 1
         except Exception as exc:
-            unreal.log_warning("[SquadHeight] add_level_to_world(%s): %s"
-                               % (pkg, exc))
+            sh_log.get().warn("add_level_to_world(%s): %s" % (pkg, exc))
     try:
         unreal.GameplayStatics.flush_level_streaming(world)
     except Exception:
         pass
-    unreal.log("[SquadHeight] attached %d/%d; landscape proxies now: %d"
-               % (added, len(to_add), _landscape_count(world)))
+    sh_log.get().detail("attached %d/%d; landscape proxies now: %d"
+                        % (added, len(to_add), _landscape_count(world)))
 
 
 def _ensure_levels_visible(level_path):
@@ -205,7 +205,7 @@ def _ensure_levels_visible(level_path):
     try:
         levels = list(unreal.EditorLevelUtils.get_levels(world))
     except Exception as exc:
-        unreal.log_warning("[SquadHeight] get_levels failed: %s" % exc)
+        sh_log.get().warn("get_levels failed: %s" % exc)
         return
     targets = []
     for lvl in levels:
@@ -218,8 +218,8 @@ def _ensure_levels_visible(level_path):
         targets.append(lvl)
     if not targets:
         return
-    unreal.log("[SquadHeight] forcing %d loaded sublevels visible "
-               "(hidden levels have no collision)..." % len(targets))
+    sh_log.get().detail("forcing %d loaded sublevels visible (hidden levels "
+                        "have no collision)..." % len(targets))
     flags = [True] * len(targets)
     done = False
     for mode_name in ("DONT_MODIFY_DIRTY_FLAG", "MODIFY_ON_CHANGE"):
@@ -238,7 +238,7 @@ def _ensure_levels_visible(level_path):
             unreal.EditorLevelUtils.set_levels_visibility(targets, flags, False)
             done = True
         except Exception as exc:
-            unreal.log_warning("[SquadHeight] set_levels_visibility: %s" % exc)
+            sh_log.get().warn("set_levels_visibility: %s" % exc)
 
 
 def main():
@@ -263,9 +263,11 @@ def main():
     # the run that finds every map already exported.
     one_map = bool(os.environ.get("SQUADHEIGHT_ONE_MAP"))
 
-    unreal.log("[SquadHeight] Batch export: %d map(s), output root: %s%s"
-               % (len(maps), output_root,
-                  " (one map per editor run)" if one_map else ""))
+    log = sh_log.start_session(
+        output_root,
+        "Batch export: %d map(s) -> %s%s"
+        % (len(maps), output_root,
+           "  (one map per editor run)" if one_map else ""))
 
     report = []
     finished_early = False
@@ -289,19 +291,20 @@ def main():
         # (delete the map's output folder, or set SQUADHEIGHT_FORCE=1, to redo).
         done_marker = os.path.join(output_root, name or level.rsplit("/", 1)[-1],
                                    "meta.json")
+        label = "[%d/%d]" % (i + 1, len(maps))
         if os.path.isfile(done_marker) and not os.environ.get("SQUADHEIGHT_FORCE"):
-            unreal.log("[SquadHeight] ===== [%d/%d] %s — already exported, "
-                       "skipping =====" % (i + 1, len(maps), level))
+            log.step("%s %s - already exported, skipping" % (label, level))
             report.append({"level": level, "status": "skipped", "seconds": 0})
             continue
 
-        unreal.log("[SquadHeight] ===== [%d/%d] %s =====" % (i + 1, len(maps), level))
+        log.detail("%s loading level %s" % (label, level))
         t_map = time.time()
         try:
             if not _load_level(level):
                 raise RuntimeError("load_map returned false for %s" % level)
             out_dir = export_heightmap.run_export(
-                output_dir=output_root, map_name=name, overrides=overrides
+                output_dir=output_root, map_name=name, overrides=overrides,
+                progress_label=label,
             )
             if out_dir is None:
                 raise RuntimeError("export cancelled")
@@ -310,8 +313,8 @@ def main():
                 "seconds": round(time.time() - t_map, 1),
             })
         except Exception as exc:
-            unreal.log_error("[SquadHeight] FAILED %s: %s" % (level, exc))
-            unreal.log_error(traceback.format_exc())
+            log.error("FAILED %s: %s" % (level, exc))
+            log.detail(traceback.format_exc())
             report.append({
                 "level": level, "status": "failed", "error": str(exc),
                 "seconds": round(time.time() - t_map, 1),
@@ -327,28 +330,31 @@ def main():
                 pass
 
         if one_map and report and report[-1]["status"] in ("ok", "failed"):
-            unreal.log("[SquadHeight] one-map mode: exiting after %s; "
-                       "the relaunch loop continues with the next map." % level)
+            log.step("one-map mode: exiting after %s; the relaunch loop "
+                     "continues with the next map." % level)
             finished_early = True
             break
 
     # Summary + machine-readable report for CI-style usage.
     ok = sum(1 for r in report if r["status"] in ("ok", "skipped"))
-    unreal.log("[SquadHeight] Batch finished: %d/%d ok in %.0f s"
-               % (ok, len(report), time.time() - t_batch))
+    log.phase("Batch finished: %d/%d ok in %s"
+              % (ok, len(report), sh_log.fmt_duration(time.time() - t_batch)))
     for r in report:
-        line = "[SquadHeight]   %-8s %s (%.0fs)" % (
-            r["status"].upper(), r["level"], r["seconds"])
-        (unreal.log if r["status"] != "failed" else unreal.log_error)(line)
+        line = "%-8s %s (%s)" % (
+            r["status"].upper(), r["level"], sh_log.fmt_duration(r["seconds"]))
+        (log.error if r["status"] == "failed" else log.step)(line)
 
     if not finished_early:
         if not os.path.isdir(output_root):
             os.makedirs(output_root)
-        with open(os.path.join(output_root, "batch_report.json"), "w") as f:
+        report_path = os.path.join(output_root, "batch_report.json")
+        with open(report_path, "w") as f:
             json.dump({"finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                                      time.gmtime()),
                        "results": report}, f, indent=2)
+        log.detail("wrote %s" % report_path)
 
+    log.close()
     if ok != len(report):
         # Non-zero exit so the .bat / CI can detect partial failure.
         sys.exit(1)

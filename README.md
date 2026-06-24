@@ -84,18 +84,25 @@ without you babysitting the editor. Do this once per SDK/map update.
 
 ### What you'll see while it runs
 
-Progress is printed live — you are never left guessing:
+The console stays light — clean plain-English lines, not the engine's log
+firehose:
 
-* **Per map:** a header `===== [3/26] Chora =====` as each one starts, and its
-  duration when it finishes.
-* **Within a map** (the scan takes minutes at 1 m): a line every 25 rows, e.g.
-  `row 1200/4065  (46000 traces/s, ETA 4m02s)` — current row, trace rate and
-  estimated time left.
-* **At the end:** `Batch finished: 24/26 ok in 446 s` plus a per-map summary.
+* **Per map:** a phase header `[3/26] Exporting Chora @ 1.00 m` as each one
+  starts, then short steps for each stage (grid size, collision settle,
+  scanning, writing) and a closing `Done Chora: scan 4m02s, structures 1.1M,
+  foliage hits skipped 402k`.
+* **During the scan** (minutes at 1 m): a single bar that updates in place, e.g.
+  `[#########---------------]  41%  row 1700/4065  46.0k traces/s  ETA 4m02s`.
+* **At the end:** `Batch finished: 24/26 ok in 7m26s` plus one line per map.
 
-In the headless `.bat` these stream in the console window (and into the
-project's `Saved/Logs`). If you instead run a single map from inside the open
-editor, you also get a graphical progress bar with a **Cancel** button.
+Everything verbose — every detail line plus a breadcrumb of the scan timing —
+is appended to **`output/logs/squadheight_<date>.log`**, the file to open when
+a run needs troubleshooting. The engine's own full log still lands in the
+project's `Saved/Logs`. To put the raw engine firehose back on the console for
+deep debugging, set `SQUADHEIGHT_VERBOSE=1` before launching the `.bat`.
+
+If you instead run a single map from inside the open editor, you also get a
+graphical progress bar with a **Cancel** button.
 
 ## Read first — what the values mean at the edges
 
@@ -131,6 +138,7 @@ tools/
   compare_heightmaps.py         diff a new export against a legacy heightmap
   find_alignment.py             recover minimap bounds by image registration
   png16.py                      dependency-free grayscale (8/16-bit) + RGB (8-bit) PNG writer
+  sh_log.py                     clean console + log-file reporter (headless runs)
   _selftest.py                  offline tests (no Unreal needed)
 plan_b_cpp/                     C++ commandlet skeleton (optional, see below)
 ```
@@ -256,8 +264,9 @@ lets you sanity-check the output before the real export.
    them with the SquadCalc bounds. Two ways, your choice:
    * **Headless:** run `run_make_config.bat` (reuses `settings.bat`). Nothing
      is loaded, so it can't OOM and needs no relaunch loop — one editor run.
-     The chosen level for each map (and its alternatives) is printed to the
-     log, so you can still review the picks afterwards.
+     The chosen level for each map is printed live (clean console); the
+     alternatives and full detail go to `output/logs/squadheight_<date>.log`,
+     so you can still review the picks afterwards.
    * **In the editor:** run `tools/make_config.py` in the Python console
      (Cmd mode: `py ".../tools/make_config.py"`).
 

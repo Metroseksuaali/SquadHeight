@@ -20,8 +20,18 @@ if not exist "%SQUADHEIGHT_CONFIG%" (
     exit /b 2
 )
 
+REM Console verbosity: by default the engine's own log is NOT streamed to the
+REM console - it floods it with thousands of asset/shader/streaming lines.
+REM batch_export.py prints a clean plain-English phase + progress view instead,
+REM and the full detail is written to output\logs\squadheight_<date>.log (plus
+REM the engine's own Saved\Logs). Set SQUADHEIGHT_VERBOSE=1 (here or in
+REM settings.bat) to ALSO stream the raw engine log to the console for deep
+REM debugging.
+set "ENGINE_LOG_ARGS="
+if defined SQUADHEIGHT_VERBOSE set "ENGINE_LOG_ARGS=-stdout -FullStdOutLogOutput"
+
 echo [SquadHeight] Starting headless batch export...
-echo [SquadHeight] Log output follows (also written to the project's Saved\Logs).
+echo [SquadHeight] Clean progress shows below; full detail -^> output\logs\ and Saved\Logs.
 
 REM Notes:
 REM  * -run=pythonscript executes the script via the Python commandlet.
@@ -52,7 +62,7 @@ if %ATTEMPT% GTR 40 (
 )
 echo [SquadHeight] === editor run %ATTEMPT% ===
 "%UE_CMD%" "%UPROJECT%" -run=pythonscript -script="%~dp0tools\batch_export.py" ^
-    -stdout -FullStdOutLogOutput -Unattended -NoSplash -NoSound -NoLiveCoding
+    %ENGINE_LOG_ARGS% -Unattended -NoSplash -NoSound -NoLiveCoding
 set "RC=%ERRORLEVEL%"
 if exist "%REPORT%" goto done
 echo [SquadHeight] Editor exited without a final report (exit code %RC%) - resuming...
@@ -63,6 +73,6 @@ if "%RC%"=="0" (
     echo [SquadHeight] Batch export finished OK.
 ) else (
     echo [SquadHeight] Batch export finished with failures (exit code %RC%^).
-    echo [SquadHeight] Check output above and output\batch_report.json.
+    echo [SquadHeight] See output\batch_report.json and output\logs\ for detail.
 )
 exit /b %RC%

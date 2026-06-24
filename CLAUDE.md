@@ -20,6 +20,13 @@ what a working session needs that the README doesn't.
   `heightmap_500.json` (SquadCalc drop-in), `heightmap_16bit.png` /
   `heightmap_8bit.png` (preview renders, 16-bit is the real one),
   `meta.json` (bounds/resolution/orientation/z-offset + trace stats).
+  `output/logs/squadheight_<date>.log` (gitignored) — the verbose run log.
+* `tools/sh_log.py` — the headless console/log layer all three editor scripts
+  use. Two channels: a clean plain-English console (written via `os.write(1)`,
+  so it survives the runners NOT passing `-stdout`) and the verbose
+  `output/logs/` file. The `.bat`s no longer stream the engine firehose by
+  default; `SQUADHEIGHT_VERBOSE=1` restores `-stdout -FullStdOutLogOutput`
+  (and echoes `detail()` lines to the console). Engine log still in `Saved/Logs`.
 * `squadcalc-test/` — local SquadCalc in Docker: serves OUR heightmaps, proxies
   everything else to production `squadcalc.app/api`. `stage_heightmaps.py`
   copies output → `heightmaps/`; `crosscheck.py` / `render_compare.py` validate

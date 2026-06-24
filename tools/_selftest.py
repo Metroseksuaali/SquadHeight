@@ -180,6 +180,61 @@ check("scaling recap overwrite + preserve sibling",
       recap["MapA"]["png16_meters_per_unit"] == 0.005 and "MapB" in recap,
       str(recap))
 
+# ---- sh_log: clean console vs. verbose log file -----------------------------
+import sh_log  # noqa: E402
+
+sh_log.unreal = None  # don't mirror to the stubbed unreal.log during tests
+
+check("fmt_duration",
+      sh_log.fmt_duration(294) == "4m54s" and sh_log.fmt_duration(9) == "9s")
+check("fmt_count",
+      sh_log.fmt_count(16_700_000) == "16.7M"
+      and sh_log.fmt_count(4100) == "4.1k" and sh_log.fmt_count(320) == "320")
+
+# A Reporter splits lines across two channels: a clean console (phase/step/
+# warn/progress) and a verbose file (everything). detail() is file-only.
+log_path = os.path.join(tmp, "logs", "sess.log")
+rep = sh_log.Reporter(log_path=log_path, verbose=False)
+console = []
+rep._to_console = lambda text, newline=True: console.append(text)
+rep.phase("Scanning grid")
+rep.step("Grid 10 x 10")
+rep.detail("HitResult strategy: tuple")   # file only, must NOT reach console
+rep.warn("did not stabilize")
+rep.progress(10, 10, "row 10/10")          # final tick -> file breadcrumb
+rep.close()
+
+console_text = "\n".join(console)
+check("console shows phase", "==> Scanning grid" in console_text)
+check("console shows step", "Grid 10 x 10" in console_text)
+check("console hides detail", "HitResult strategy" not in console_text)
+check("console shows warn", "did not stabilize" in console_text)
+
+file_text = open(log_path, encoding="utf-8").read()
+check("file keeps phase", "==> Scanning grid" in file_text)
+check("file keeps detail", "HitResult strategy: tuple" in file_text)
+check("file keeps warn", "WARNING: did not stabilize" in file_text)
+check("file keeps progress", "progress 100%" in file_text)
+
+# verbose=True echoes detail to the console too (live troubleshooting).
+rep2 = sh_log.Reporter(log_path=os.path.join(tmp, "logs", "sess2.log"),
+                       verbose=True)
+console2 = []
+rep2._to_console = lambda text, newline=True: console2.append(text)
+rep2.detail("verbose detail line")
+rep2.close()
+check("verbose echoes detail", any("verbose detail line" in t for t in console2))
+
+# start_session puts one dated file under <output_root>/logs and a same-day
+# re-entry appends to it (the .bat relaunch loop reuses one file per day).
+s1 = sh_log.start_session(tmp, "Session A")
+sess_path = s1.log_path
+sh_log.start_session(tmp, "Session B")
+sess_text = open(sess_path, encoding="utf-8").read()
+check("session log under logs/", os.path.basename(os.path.dirname(sess_path)) == "logs")
+check("session log appends", "Session A" in sess_text and "Session B" in sess_text)
+sh_log.get().close()
+
 print()
 if failures:
     print("FAILED: %d check(s): %s" % (len(failures), ", ".join(failures)))

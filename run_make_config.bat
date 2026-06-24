@@ -20,17 +20,25 @@ call "%~dp0settings.bat"
 if not exist "%UE_CMD%"   ( echo [SquadHeight] UE_CMD not found: %UE_CMD% & exit /b 2 )
 if not exist "%UPROJECT%" ( echo [SquadHeight] UPROJECT not found: %UPROJECT% & exit /b 2 )
 
+REM By default the engine's own log is kept OFF the console (it floods it);
+REM make_config.py prints a clean list of the level picks instead, and the full
+REM detail (including each map's alternatives) goes to output\logs\ and the
+REM project's Saved\Logs. Set SQUADHEIGHT_VERBOSE=1 to also stream the raw
+REM engine log to the console.
+set "ENGINE_LOG_ARGS="
+if defined SQUADHEIGHT_VERBOSE set "ENGINE_LOG_ARGS=-stdout -FullStdOutLogOutput"
+
 echo [SquadHeight] Generating tools\maps_config.json (headless)...
-echo [SquadHeight] Log output follows (also written to the project's Saved\Logs).
+echo [SquadHeight] Level picks show below; full detail -^> output\logs\ and Saved\Logs.
 
 "%UE_CMD%" "%UPROJECT%" -run=pythonscript -script="%~dp0tools\make_config.py" ^
-    -stdout -FullStdOutLogOutput -Unattended -NoSplash -NoSound -NoLiveCoding
+    %ENGINE_LOG_ARGS% -Unattended -NoSplash -NoSound -NoLiveCoding
 set "RC=%ERRORLEVEL%"
 
 if "%RC%"=="0" (
     echo [SquadHeight] Wrote tools\maps_config.json - review the level picks above
-    echo [SquadHeight] ^(especially maps that printed alternatives^), then run run_batch_export.bat.
+    echo [SquadHeight] ^(alternatives are listed in output\logs\^), then run run_batch_export.bat.
 ) else (
-    echo [SquadHeight] make_config exited with code %RC% - check the output above.
+    echo [SquadHeight] make_config exited with code %RC% - check output\logs\ and Saved\Logs.
 )
 exit /b %RC%

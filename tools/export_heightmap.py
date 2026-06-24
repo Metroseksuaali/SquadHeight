@@ -63,6 +63,7 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.append(_SCRIPT_DIR)
 
 import png16  # noqa: E402  (local minimal PNG writer, no external deps)
+import sh_log  # noqa: E402  (clean console + log-file reporter, stdlib-only)
 
 
 # ============================================================================
@@ -220,10 +221,10 @@ CONFIG = {
     "downsample_to": None,
 
     # ---- Progress / responsiveness ------------------------------------
-    # Rows per progress-dialog tick. The ScopedSlowTask dialog keeps the
-    # editor pumping messages (and gives you a Cancel button); log lines with
-    # rate + ETA are emitted every `log_every_rows`.
-    "log_every_rows": 25,
+    # The editor-side ScopedSlowTask dialog (one tick per row) keeps the editor
+    # pumping messages and gives an interactive Cancel button. The console
+    # progress bar + ETA and the log file are handled by sh_log (time-throttled
+    # so the cadence needs no tuning here).
 }
 
 # UE works in centimeters.
@@ -311,7 +312,7 @@ def _parse_hit(hit):
             _HIT_MODE = "props"
         else:
             _HIT_MODE = "tuple"
-        unreal.log("[SquadHeight] HitResult read strategy: %s" % _HIT_MODE)
+        sh_log.get().detail("HitResult read strategy: %s" % _HIT_MODE)
 
     if _HIT_MODE == "props":
         location = _hit_prop(hit, "location", "impact_point")
@@ -475,15 +476,15 @@ def _settle_async_collision(world, tracer, n_cols, n_rows, step,
             except Exception:
                 pass
         n = sparse_structure_count()
-        unreal.log("[SquadHeight] collision settle round %d: %d structure "
-                   "hits in sparse pre-scan" % (rounds, n))
+        sh_log.get().detail("collision settle round %d: %d structure hits in "
+                            "sparse pre-scan" % (rounds, n))
         if n == prev:
             break
         prev = n
         time.sleep(0.5)
     else:
-        unreal.log_warning("[SquadHeight] structure hits did NOT stabilize "
-                           "in 8 rounds - export may be incomplete!")
+        sh_log.get().warn("structure hits did NOT stabilize in 8 rounds - "
+                          "export may be incomplete!")
     # The pre-scan ran through the tracer - reset its diagnostics so
     # meta.json reflects the real scan only.
     tracer.mesh_counts = {}
@@ -861,16 +862,19 @@ def _downsample(rows, n):
 # Main export
 # ============================================================================
 
-def run_export(output_dir=None, map_name=None, overrides=None):
+def run_export(output_dir=None, map_name=None, overrides=None,
+               progress_label=None):
     """
     Export the currently loaded level.
 
-    output_dir : folder that will receive a <MapName>/ subfolder.
-                 Default: <this repo>/output/
-    map_name   : override the subfolder name (default: world name).
-    overrides  : dict merged shallowly over CONFIG (nested "trace" dict is
-                 merged too), e.g. {"resolution_m": 0.5,
-                                    "trace": {"channel": "TraceTypeQuery3"}}.
+    output_dir     : folder that will receive a <MapName>/ subfolder.
+                     Default: <this repo>/output/
+    map_name       : override the subfolder name (default: world name).
+    overrides      : dict merged shallowly over CONFIG (nested "trace" dict is
+                     merged too), e.g. {"resolution_m": 0.5,
+                                        "trace": {"channel": "TraceTypeQuery3"}}.
+    progress_label : optional prefix for the phase header, e.g. "[3/27]"
+                     (batch_export passes the map's position in the run).
     Returns the path of the per-map output folder.
     """
     cfg = dict(CONFIG)
@@ -893,7 +897,10 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     if not os.path.isdir(map_dir):
         os.makedirs(map_dir)
 
-    unreal.log("[SquadHeight] ===== Exporting '%s' =====" % map_name)
+    log = sh_log.ensure_session(output_dir)
+    log.phase("%sExporting %s @ %.2f m"
+              % (progress_label + " " if progress_label else "",
+                 map_name, cfg["resolution_m"]))
 
     # ---- Bounds and grid ---------------------------------------------------
     min_x, max_x, min_y, max_y, min_z, max_z = compute_bounds(world, cfg)
@@ -903,17 +910,15 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     z_top = max_z + cfg["trace_top_margin_m"] * _M_TO_CM
     z_bottom = min_z - cfg["trace_bottom_margin_m"] * _M_TO_CM
 
-    unreal.log(
-        "[SquadHeight] Bounds (m): X [%.1f .. %.1f]  Y [%.1f .. %.1f]  "
-        "Z [%.1f .. %.1f]" % (
+    log.detail(
+        "Bounds (m): X [%.1f .. %.1f]  Y [%.1f .. %.1f]  Z [%.1f .. %.1f]" % (
             min_x / 100, max_x / 100, min_y / 100, max_y / 100,
             min_z / 100, max_z / 100,
         )
     )
-    unreal.log(
-        "[SquadHeight] Grid: %d cols x %d rows @ %.2f m  (%d traces minimum)"
-        % (n_cols, n_rows, cfg["resolution_m"], n_cols * n_rows)
-    )
+    log.step("Grid: %d cols x %d rows @ %.2f m  (%s traces)"
+             % (n_cols, n_rows, cfg["resolution_m"],
+                sh_log.fmt_count(n_cols * n_rows)))
 
     # Optional grid rotation: sample positions are spun around the bounds
     # center so the exported rows/cols match a rotated minimap capture.
@@ -925,14 +930,13 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     half_u = (n_cols - 1) * step / 2.0
     half_v = (n_rows - 1) * step / 2.0
     if rot:
-        unreal.log("[SquadHeight] Grid rotated %.2f deg around (%.1f, %.1f) m"
+        log.detail("Grid rotated %.2f deg around (%.1f, %.1f) m"
                    % (cfg["grid_rotation_deg"], center_x / 100, center_y / 100))
 
     # ---- Trace ----------------------------------------------------------
     ignore_actors = _build_ignore_list(world, cfg)
-    unreal.log(
-        "[SquadHeight] Ignoring %d foliage actors up-front; mode=%s, "
-        "channel/profile=%s" % (
+    log.detail(
+        "Ignoring %d foliage actors up-front; mode=%s, channel/profile=%s" % (
             len(ignore_actors), cfg["surface_mode"],
             cfg["trace"]["profile"] if cfg["trace"]["by"] == "profile"
             else cfg["trace"]["channel"],
@@ -941,9 +945,12 @@ def run_export(output_dir=None, map_name=None, overrides=None):
 
     tracer = _Tracer(world, cfg, ignore_actors, z_top, z_bottom)
 
+    log.step("Settling async collision (finishing mesh compilation)...")
     settle_rounds, settle_hits = _settle_async_collision(
         world, tracer, n_cols, n_rows, step, half_u, half_v,
         center_x, center_y, cos_r, sin_r)
+    log.step("Collision settled: %s structure hits in sparse pre-scan "
+             "(%d round(s))" % (sh_log.fmt_count(settle_hits), settle_rounds))
 
     rows = []
     no_hit = 0
@@ -951,11 +958,12 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     landscape_fallbacks = 0
     t0 = time.time()
 
+    log.phase("Scanning grid")
     with unreal.ScopedSlowTask(n_rows, "SquadHeight: exporting %s" % map_name) as task:
         task.make_dialog(True)  # progress bar + Cancel button in the editor
         for r in range(n_rows):
             if task.should_cancel():
-                unreal.log_warning("[SquadHeight] Cancelled by user at row %d." % r)
+                log.warn("Cancelled by user at row %d." % r)
                 return None
             v = r * step - half_v
             row = array("f")
@@ -979,14 +987,13 @@ def run_export(output_dir=None, map_name=None, overrides=None):
             rows.append(row)
 
             task.enter_progress_frame(1)
-            if (r + 1) % cfg["log_every_rows"] == 0 or r == n_rows - 1:
-                elapsed = time.time() - t0
-                rate = (r + 1) * n_cols / max(elapsed, 1e-6)
-                eta = (n_rows - r - 1) * n_cols / max(rate, 1e-6)
-                unreal.log(
-                    "[SquadHeight] row %d/%d  (%.0f traces/s, ETA %dm%02ds)"
-                    % (r + 1, n_rows, rate, int(eta // 60), int(eta % 60))
-                )
+            elapsed = time.time() - t0
+            rate = (r + 1) * n_cols / max(elapsed, 1e-6)
+            eta = (n_rows - r - 1) * n_cols / max(rate, 1e-6)
+            log.progress(
+                r + 1, n_rows,
+                "row %d/%d  %s traces/s  ETA %s"
+                % (r + 1, n_rows, sh_log.fmt_count(rate), sh_log.fmt_duration(eta)))
 
     scan_seconds = time.time() - t0
 
@@ -1011,9 +1018,9 @@ def run_export(output_dir=None, map_name=None, overrides=None):
         # walk fills thin gaps from their neighbors for a bounded number of
         # passes without ever materializing the full hole set (11M holes in
         # a Python set has crashed the editor); the rest gets the map min.
-        unreal.log_warning(
-            "[SquadHeight] %d cells had no hit; neighbor-filling thin gaps, "
-            "min-filling large empty regions." % no_hit
+        log.step(
+            "Filling %d cells with no hit (neighbor-fill thin gaps, "
+            "min-fill large empty regions)..." % no_hit
         )
         neighbors = ((1, 0), (-1, 0), (0, 1), (0, -1),
                      (1, 1), (1, -1), (-1, 1), (-1, -1))
@@ -1057,8 +1064,8 @@ def run_export(output_dir=None, map_name=None, overrides=None):
                     row[i] = h_min
                     remaining += 1
         if remaining:
-            unreal.log("[SquadHeight] %d cells in large empty regions filled "
-                       "with min height %.2f m." % (remaining, h_min))
+            log.detail("%d cells in large empty regions filled with min "
+                       "height %.2f m." % (remaining, h_min))
 
     z_offset = h_min if cfg["normalize_min_to_zero"] else 0.0
     if z_offset:
@@ -1070,6 +1077,7 @@ def run_export(output_dir=None, map_name=None, overrides=None):
     rows = _apply_orientation(rows, cfg)
 
     # ---- Write outputs ------------------------------------------------------
+    log.step("Writing heightmap.json, PNGs and meta.json...")
     json_path = os.path.join(map_dir, "heightmap.json")
     png_path = os.path.join(map_dir, "heightmap_16bit.png")
     png8_path = os.path.join(map_dir, "heightmap_8bit.png")
@@ -1156,23 +1164,23 @@ def run_export(output_dir=None, map_name=None, overrides=None):
                            meta["png8_meters_per_unit"],
                            meta["rb_meters_per_unit"])
 
-    unreal.log("[SquadHeight] ----- DONE: %s -----" % map_name)
-    unreal.log("[SquadHeight] height min/max: %.2f / %.2f m (z_offset %.2f m, "
+    log.phase("Done %s: scan %s, structures %s, foliage hits skipped %s"
+              % (map_name, sh_log.fmt_duration(scan_seconds),
+                 sh_log.fmt_count(structure_cells),
+                 sh_log.fmt_count(tracer.foliage_skips)))
+    log.detail("height min/max: %.2f / %.2f m (z_offset %.2f m, "
                "world Z %.2f..%.2f m)"
                % (out_min, out_max, z_offset, h_min, h_max))
-    unreal.log("[SquadHeight] 16-bit PNG scale: %.4f gray-units per meter "
+    log.detail("16-bit PNG scale: %.4f gray-units per meter "
                "(%.6f m per gray-unit)"
                % (png_scale, (out_max - out_min) / 65535.0))
-    unreal.log("[SquadHeight] cells on structures: %d, foliage hits skipped: %d, "
-               "scan time: %.0f s"
-               % (structure_cells, tracer.foliage_skips, scan_seconds))
-    unreal.log("[SquadHeight] wrote: %s" % json_path)
-    unreal.log("[SquadHeight]        %s" % png_path)
-    unreal.log("[SquadHeight]        %s" % png8_path)
-    unreal.log("[SquadHeight]        %s" % png_rb_path)
+    log.detail("wrote: %s" % json_path)
+    log.detail("       %s" % png_path)
+    log.detail("       %s" % png8_path)
+    log.detail("       %s" % png_rb_path)
     if down_path:
-        unreal.log("[SquadHeight]        %s" % down_path)
-    unreal.log("[SquadHeight]        %s" % os.path.join(output_dir, "scaling.json"))
+        log.detail("       %s" % down_path)
+    log.detail("       %s" % os.path.join(output_dir, "scaling.json"))
     return map_dir
 
 
