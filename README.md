@@ -87,6 +87,8 @@ without you babysitting the editor. Do this once per SDK/map update.
 The console stays light — clean plain-English lines, not the engine's log
 firehose:
 
+![Headless batch export: clean console with live progress](docs/headless_console.png)
+
 * **Per map:** a phase header `[3/26] Exporting Chora @ 1.00 m` as each one
   starts, then short steps for each stage (grid size, collision settle,
   scanning, writing) and a closing `Done Chora: scan 4m02s, structures 1.1M,
@@ -149,7 +151,6 @@ tools/
   png16.py                      dependency-free grayscale (8/16-bit) + RGB (8-bit) PNG writer
   sh_log.py                     clean console + log-file reporter (headless runs)
   _selftest.py                  offline tests (no Unreal needed)
-plan_b_cpp/                     C++ commandlet skeleton (optional, see below)
 ```
 
 ## Output
@@ -433,11 +434,7 @@ python tools/find_alignment.py --selftest output/MapName   # verify the tool fir
 * **Bridges:** a 2.5D heightmap stores one value per cell, so a bridge and
   the road under it can't both exist. See `surface_mode` above.
 * **Performance:** ~40–50k traces/s in editor Python on a typical machine.
-  4 km @ 1 m ≈ 16.5M traces ≈ 6 minutes. The editor stays responsive. If
-  that's ever too slow (e.g. 0.5 m batches over all maps),
-  `plan_b_cpp/` contains a commandlet skeleton of the same algorithm in C++
-  with `ParallelFor`, which is orders of magnitude faster but requires
-  building an editor module against the SDK.
+  4 km @ 1 m ≈ 16.5M traces ≈ 6 minutes, and the editor stays responsive.
 
 </details>
 

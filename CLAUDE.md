@@ -29,9 +29,9 @@ what a working session needs that the README doesn't.
   (default) and `pause` at the end so the window stays open; they echo both log
   paths up front. `SQUADHEIGHT_VERBOSE=1` instead streams the raw engine log to
   the console (`-stdout -FullStdOutLogOutput`) and echoes `detail()` lines too.
-  Engine log also still in `Saved/Logs`. NOTE: the CONOUT$/redirect split is
-  unverified on the actual SDK build — if the console is still noisy, the build
-  may write its log via a private console handle rather than the std handle.
+  Engine log also still in `Saved/Logs`. Confirmed on the Squad SDK build: a
+  real headless batch run shows only the clean SquadHeight lines and the live
+  progress bar on the console (the engine firehose goes to the file).
 * `squadcalc-test/` — local SquadCalc in Docker: serves OUR heightmaps, proxies
   everything else to production `squadcalc.app/api`. `stage_heightmaps.py`
   copies output → `heightmaps/`; `crosscheck.py` / `render_compare.py` validate
