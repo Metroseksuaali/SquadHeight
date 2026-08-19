@@ -32,7 +32,7 @@ return {
     -- Work budget per game-thread update.
     -- The exporter stops when either limit is reached.
     max_cells_per_tick = 100000,
-    frame_budget_ms = 35.0,
+    frame_budget_ms = 45.0,
 
     -- UE4SS creates many temporary Lua values while unpacking FHitResult out-params.
     -- Do small GC work every chunk and a full collection periodically so long 1 m
@@ -82,6 +82,41 @@ return {
     exclude_component_classes = {
         FoliageInstancedStaticMeshComponent = true,
         LandscapeGrassComponent = true,
+    },
+
+    -- Hrodna/UE5 PCG vegetation is not owned by InstancedFoliageActor.
+    -- Do NOT ignore every PCGStamp_* actor: PCG may also contain rocks/props.
+    -- A hit is skipped only when BOTH conditions match:
+    --   actor name starts with "PCGStamp_"
+    --   component instance name matches one of these known vegetation mesh bases.
+    -- The exporter caches this decision per component, so the string checks happen
+    -- only once per unique component rather than once per scanned cell.
+    pcg_vegetation_actor_name_prefixes = {
+        "PCGStamp_",
+    },
+
+    -- The component names below are exact vegetation asset/component bases, so
+    -- they are selective enough on their own. Runtime PCG can re-parent/generated
+    -- components under actors whose runtime FName is not PCGStamp_N, therefore
+    -- requiring the actor prefix can miss the vegetation even though the mesh is known.
+    -- Set true only if you explicitly want the extra PCGStamp_N owner condition.
+    pcg_vegetation_require_actor_prefix = false,
+
+    pcg_vegetation_component_name_bases = {
+        "ISM_SM_Birch_Large02",
+        "ISM_SM_Birchcluster_01",
+        "ISM_SM_BirchLarge03",
+        "ISM_SM_GrassRiverCluster_medl01",
+        "ISM_SM_GrassRiverCluster_medl02",
+        "ISM_SM_Oakshrub01",
+        "ISM_SM_Oakshrub02",
+        "ISM_SM_Reeds02",
+        "ISM_SM_Reeds03",
+        "ISM_SM_Reeds04",
+        "ISM_SM_Reeds05",
+        "ISM_SM_scotspine_large01",
+        "ISM_SM_Scotspine_mid01",
+        "ISM_SM_Scotspine_small01",
     },
 
     -- Only skipped when the owning actor does not appear to contain a StaticMeshComponent.

@@ -27,6 +27,7 @@ local State = {
     trace_end = { X=0, Y=0, Z=0 },
     cache_component_count = 0,
     cache_actor_count = 0,
+    vegetation_component_count = 0,
     next_full_gc_cell = 0,
 }
 
@@ -105,6 +106,69 @@ end
 
 local function starts_with(s, prefix)
     return s:sub(1, #prefix) == prefix
+end
+
+-- Pre-normalize PCG filter strings once at mod load. These lists are then used
+-- only on component-classification cache misses, never in the per-cell cache-hit path.
+local PCG_VEGETATION_ACTOR_PREFIXES = {}
+for _, prefix in ipairs(Config.pcg_vegetation_actor_name_prefixes or {}) do
+    PCG_VEGETATION_ACTOR_PREFIXES[#PCG_VEGETATION_ACTOR_PREFIXES + 1] =
+        string.lower(prefix)
+end
+
+local PCG_VEGETATION_COMPONENT_BASES = {}
+for _, base in ipairs(Config.pcg_vegetation_component_name_bases or {}) do
+    PCG_VEGETATION_COMPONENT_BASES[#PCG_VEGETATION_COMPONENT_BASES + 1] =
+        string.lower(base)
+end
+
+local function matches_instance_base_name(low_name, low_base)
+    if low_name == low_base then return true end
+    if not starts_with(low_name, low_base) then return false end
+    -- PCG/ISM generated components normally append "_0", "_1", etc.
+    -- Requiring the separator avoids broad substring matches.
+    return low_name:sub(#low_base + 1, #low_base + 1) == "_"
+end
+
+local function is_known_pcg_vegetation(actor, component)
+    if #PCG_VEGETATION_COMPONENT_BASES == 0 or not is_valid(component) then
+        return false
+    end
+
+    -- Exact known vegetation component-base match. This is intentionally not a
+    -- broad keyword test: e.g. rocks/props inside PCGStamp are unaffected.
+    -- Generated ISM components may append _0, _1, ... to the configured base.
+    local low_component_name = string.lower(object_name(component))
+    local component_matches = false
+    for _, base in ipairs(PCG_VEGETATION_COMPONENT_BASES) do
+        if matches_instance_base_name(low_component_name, base) then
+            component_matches = true
+            break
+        end
+    end
+    if not component_matches then
+        return false
+    end
+
+    -- Runtime PCG can re-parent generated components under an actor whose FName
+    -- is not the editor-side PCGStamp_N name. Exact vegetation component names
+    -- are already selective; by default we therefore do not require actor name.
+    if not Config.pcg_vegetation_require_actor_prefix then
+        return true
+    end
+
+    if #PCG_VEGETATION_ACTOR_PREFIXES == 0 or not is_valid(actor) then
+        return false
+    end
+
+    local low_actor_name = string.lower(object_name(actor))
+    for _, prefix in ipairs(PCG_VEGETATION_ACTOR_PREFIXES) do
+        if starts_with(low_actor_name, prefix) then
+            return true
+        end
+    end
+
+    return false
 end
 
 local function get_hit_field(hit, field)
@@ -293,6 +357,14 @@ local function component_is_excluded(actor, component)
 
     if Config.exclude_component_classes[cn] then
         excluded = true
+    end
+
+    -- UE5 PCG vegetation can be emitted as ordinary ISM components owned by
+    -- generic Actor instances named PCGStamp_N. Avoid a broad PCGStamp ignore:
+    -- require a known vegetation component name as well.
+    if not excluded and is_known_pcg_vegetation(actor, component) then
+        excluded = true
+        State.vegetation_component_count = State.vegetation_component_count + 1
     end
 
     if not excluded and Config.volume_shape_component_classes[cn] then
@@ -801,6 +873,7 @@ local function write_meta(snapshot)
             cells = snapshot.total_cells,
             trace_calls = snapshot.trace_calls,
             filtered_hits = snapshot.filtered_hits,
+            vegetation_components_filtered = snapshot.vegetation_component_count,
             structure_cells = snapshot.structure_cells,
             no_hit_cells = snapshot.no_hit_cells,
             max_hit_columns = snapshot.max_hit_columns,
@@ -905,6 +978,7 @@ local function begin_postprocess()
         total_cells = State.total_cells,
         trace_calls = State.trace_calls,
         filtered_hits = State.filtered_hits,
+        vegetation_component_count = State.vegetation_component_count,
         structure_cells = State.structure_cells,
         no_hit_cells = State.no_hit_cells,
         max_hit_columns = State.max_hit_columns,
@@ -1041,9 +1115,9 @@ local function process_chunk()
 
         local lua_mb = collectgarbage("count") / 1024.0
         log(string.format(
-            "%.1f%% | row %d/%d | %.0f cells/s | %.0fs remaining | traces=%d filtered=%d | lua=%.1fMB compCache=%d actorCache=%d",
+            "%.1f%% | row %d/%d | %.0f cells/s | %.0fs remaining | traces=%d filtered=%d vegComp=%d | lua=%.1fMB compCache=%d actorCache=%d",
             pct, State.row + 1, State.rows, rate, remaining,
-            State.trace_calls, State.filtered_hits,
+            State.trace_calls, State.filtered_hits, State.vegetation_component_count,
             lua_mb, State.cache_component_count, State.cache_actor_count
         ))
     end
@@ -1089,6 +1163,7 @@ function M.start()
     State.trace_end = { X=0, Y=0, Z=0 }
     State.cache_component_count = 0
     State.cache_actor_count = 0
+    State.vegetation_component_count = 0
 
     local ok, err = pcall(function()
         State.world = UEHelpers.GetWorld()
@@ -1177,6 +1252,11 @@ function M.start()
             "Trace query=%d complex=%s Z %.0f..%.0f m mode=%s",
             Config.trace_type_query, tostring(Config.trace_complex),
             Config.trace_bottom_m, Config.trace_top_m, Config.surface_mode
+        ))
+        log(string.format(
+            "Vegetation filter: %d exact component bases | require PCGStamp owner=%s",
+            #PCG_VEGETATION_COMPONENT_BASES,
+            tostring(Config.pcg_vegetation_require_actor_prefix == true)
         ))
 
         State.phase = "scanning"
