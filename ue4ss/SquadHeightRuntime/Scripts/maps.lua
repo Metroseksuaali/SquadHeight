@@ -27,8 +27,6 @@ return {
     Sanxian     = { min_x=-2300, max_x=2300, min_y=-2050, max_y=2550 },
     Skorpo      = { min_x=-3611, max_x=3238, min_y=-3293, max_y=3576 },
     Sumari      = { min_x=-640, max_x=660, min_y=-447, max_y=853 },
-    Chornivsk   = { min_x=-1649, max_x=1535, min_y=-1547, max_y=1637 },
-    HrodnaBorder = { min_x=-2015, max_x=2015, min_y=-2015, max_y=2016 },
     Tallil      = { min_x=-2340, max_x=2340, min_y=-2340, max_y=2340 },
     Yehorivka   = { min_x=-3302, max_x=3048, min_y=-3302, max_y=3048 },
 }
