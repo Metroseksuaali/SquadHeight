@@ -24,7 +24,8 @@ Enable it in the UE4SS mod list:
 
 Use a UE4SS build that supports the Unreal Engine version used by your game.
 Run only in an offline/local environment where runtime modding is permitted.
-This package contains no anti-cheat bypass.
+
+Settings example provided as well. As i recall some hooks cause crash on startup, example settings works okay.
 
 ## Usage
 
