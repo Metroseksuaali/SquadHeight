@@ -61,7 +61,15 @@ what a working session needs that the README doesn't.
 
 1. Commandlets don't load streaming sublevels; `batch_export.py` attaches them
    via the asset registry, with a blacklist of non-geometry variants
-   (`_SUBLEVEL_SKIP`: gameplay/lighting/whitebox/reference/...).
+   (`_SUBLEVEL_SKIP`: gameplay/lighting/whitebox/reference/...). The registry
+   scan also finds levels the game never streams. Sanxian was exported from
+   `Sanxian_Islands_Geo` — a stale 335 MB whole-map snapshot with its own
+   landscape and outdated buildings (ghost warehouses/quays in the water) that
+   no gameplay layer references; the game streams `L_000_Master_Sanxian`.
+   Both it and `060_Art/060_BackupMeshes/*_BM` are now skipped. To check which
+   world a map really uses, grep a gameplay layer `.umap` offline
+   (`grep -a -o "L_0[0-9][0-9]_[A-Za-z0-9_]*"`); every other configured level
+   is referenced by its layers.
 2. Hidden editor levels have NO collision — masters like Mutaha/Narva load
    sublevels hidden; they're forced visible (`set_levels_visibility`).
 3. Invisible Box/Sphere/Capsule/Brush shapes are excluded **only when the actor

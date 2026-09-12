@@ -102,6 +102,8 @@ _SUBLEVEL_SKIP = (
     "/ll_", "flythrough", "whitebox", "blockout", "old_delete", "/old",
     "wip", "playtest", "deprecated", "/050_cameras",
     "refrence", "reference",  # designer POI marker levels (OWI typo included)
+    "backupmeshes",  # Sanxian 060_BackupMeshes/*_BM: unused art copies
+    "sanxian_islands_geo",  # stale whole-map snapshot, not streamed by the game
 )
 
 
