@@ -109,6 +109,17 @@ what a working session needs that the README doesn't.
    for delivery exports: `SQUADHEIGHT_ONE_MAP=1` gives every map a fresh
    editor process via the .bat relaunch loop.
 
+10. **The SDK ships no `3rdPartyContent` at all** (`/Game/Environments/*/
+    3rdPartyContent/...`: Village_houses_modular_pack, Props, SandbagWalls,
+    Meadow, ForestCollection2). Levels keep the actors, but their meshes are
+    null — no geometry, no collision, zero-height bounds — so every trace hits
+    the ground. Deterministic, not gotcha 9: re-running changes nothing (Black
+    Coast: 84 settle hits / 442.7k structure cells both times). Houses are lost
+    on Black Coast (Pig Farm, Chernikov), Harju, Manicouagan and Narva; small
+    props/sandbags on most maps. Not fixable in the SDK exporter — the runtime
+    UE4SS exporter (`ue4ss/`) is the route. `probe_hangars.py` with
+    `SQUADHEIGHT_PROBE_NEAR=x,y,r` shows these as `<no mesh>` actors.
+
 ## Data semantics worth remembering
 
 * Heights are meters, min-normalized to 0; `world_z = value + z_offset_m`.

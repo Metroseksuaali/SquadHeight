@@ -8,6 +8,11 @@ object-type queries) to see which one actually hits.
 
     set SQUADHEIGHT_DIAG_MAP=/Game/Maps/Tallil_Outskirts/Tallil_Outskirts
     UnrealEditor-Cmd.exe <uproject> -run=pythonscript -script="tools/probe_hangars.py" ...
+
+Optional overrides:
+    SQUADHEIGHT_PROBE_KEYWORDS=barn,house       match these instead of KEYWORDS
+    SQUADHEIGHT_PROBE_NEAR=-690,-1233,60;158,882,40
+        match every static-mesh actor within R m of X,Y (world meters)
 """
 
 import os
@@ -73,7 +78,24 @@ def _collision_info(comp):
             bits.append("%s=%s" % (label, comp.get_collision_response_to_channel(ch)))
         except Exception:
             bits.append("%s=?" % label)
+    try:
+        mesh = comp.get_editor_property("static_mesh")
+        lib = unreal.EditorStaticMeshLibrary
+        if mesh:
+            bits.append("simple_shapes=%s" % lib.get_simple_collision_count(mesh))
+            bits.append("complexity=%s" % lib.get_collision_complexity(mesh))
+    except Exception:
+        pass
     return " ".join(str(b) for b in bits)
+
+
+def _near_filters():
+    near = []
+    for part in os.environ.get("SQUADHEIGHT_PROBE_NEAR", "").split(";"):
+        if part.strip():
+            x, y, r = (float(v) * 100.0 for v in part.split(","))
+            near.append((x, y, r))
+    return near
 
 
 def _describe_hit(hit):
@@ -155,6 +177,11 @@ def main():
     actors = _all_actors(world)
     log("%d actors loaded" % len(actors))
 
+    keywords = tuple(k.strip().lower() for k in
+                     os.environ.get("SQUADHEIGHT_PROBE_KEYWORDS", "").split(",")
+                     if k.strip()) or KEYWORDS
+    near = _near_filters()
+
     # mesh path -> list of (actor, comp)
     by_mesh = {}
     matched_actors = 0
@@ -170,10 +197,15 @@ def main():
         except Exception:
             pass
         actor_matched = False
+        is_near = False
+        if near and comps:
+            loc = actor.get_actor_location()
+            is_near = any((loc.x - x) ** 2 + (loc.y - y) ** 2 <= r * r
+                          for x, y, r in near)
         for comp in comps:
             path = _mesh_path(comp) or ""
             hay = "%s %s %s" % (label, cls, path.lower())
-            if any(k in hay for k in KEYWORDS):
+            if is_near if near else any(k in hay for k in keywords):
                 by_mesh.setdefault(path or "<no mesh>", []).append((actor, comp))
                 actor_matched = True
         if actor_matched:
