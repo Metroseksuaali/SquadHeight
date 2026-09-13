@@ -9,6 +9,17 @@
 True-surface heightmap exporter for the Squad SDK (Unreal editor), built to get better maps to
 [SquadCalc](https://github.com/sh4rkman/SquadCalc).
 
+> [!IMPORTANT]
+> **For the most complete heightmaps, use the [UE4SS runtime exporter](#runtime-alternative---ue4ss-no-sdk).**
+> The Squad SDK does not ship any `3rdPartyContent` assets. Levels still place
+> those actors, but their meshes are empty in the SDK, so they have no
+> collision and the SDK exporter traces straight through them to the ground.
+> The biggest loss is the *Village Houses Modular Pack* — village houses,
+> barns, sheds and shops on **Black Coast, Harju, Manicouagan and Narva**
+> (e.g. Black Coast's Pig Farm and much of Chernikov read as bare ground).
+> Small props and sandbag walls from the same folder are missing on most other
+> maps. The UE4SS exporter traces the running game, where these assets exist.
+
 SquadCalc's current heightmaps come from the UE Landscape, which contains
 terrain only. Buildings, bridges and rocks are missing, so elevation
 calculations on or near structures are wrong. SquadHeight replaces that data
@@ -151,6 +162,7 @@ tools/
   png16.py                      dependency-free grayscale (8/16-bit) + RGB (8-bit) PNG writer
   sh_log.py                     clean console + log-file reporter (headless runs)
   _selftest.py                  offline tests (no Unreal needed)
+ue4ss/                          runtime exporter for the live game (no SDK), see below
 ```
 
 ## Output
@@ -198,6 +210,30 @@ Beware of legacy leftovers: `/Game/Maps/BASRAH_CITY` still contains the
 **pre-rework** Al Basrah. Exporting it would produce heightmaps that are
 wrong for the current game. `tools/make_config.py` knows about the plugin
 roots and prefers them automatically.
+
+## Runtime alternative - UE4SS, no SDK
+
+`ue4ss/` holds a second, independent exporter contributed by
+[@yobaNGE](https://github.com/yobaNGE) in
+[#5](https://github.com/Metroseksuaali/SquadHeight/pull/5). It is a UE4SS Lua
+mod that traces the map from the **running game** instead of the editor, so it
+needs no SDK install at all. Press F8 in a loaded map, and a companion script
+(`ue4ss/convert_squadheight_png.py`, standard library only) turns the result
+into the same PNGs this repo's exporter produces.
+
+Use it when the SDK cannot reach what you want: **mod and community maps**,
+maps newer than your SDK build, and the `3rdPartyContent` buildings and props
+the SDK does not ship (see the note at the top - Black Coast, Harju,
+Manicouagan and Narva lose whole villages in the SDK). The editor exporter is
+faster (~6 min vs ~12 min for a 4 km map) and fully headless, and the current
+releases are still built from it.
+
+It writes the same `heightmap.json`, `heightmap_500.json` and `meta.json`
+contract, with the same normalization and PNG encodings. Note that it requires
+a UE4SS build from the experimental line, and that runtime modding is only
+appropriate in an offline or local environment. Setup, configuration and the
+procedure for adding your own map bounds are documented in
+[ue4ss/README.md](ue4ss/README.md).
 
 ## Requirements
 

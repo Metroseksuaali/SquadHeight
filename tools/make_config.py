@@ -107,6 +107,9 @@ EXCLUDE_SUBSTRINGS = [
     "/weatherlayer", "/vfx", "entrymap", "_gpu", "/ll_", "/wl_",
     "blockout", "_test", "profile", "/coop/", "/freemissions/",
     "/automation/", "/sound_layers/", "/sounds/",
+    # Stale standalone snapshot of the whole map (own landscape + outdated
+    # buildings); the game streams L_000_Master_Sanxian instead.
+    "sanxian_islands_geo",
 ]
 
 

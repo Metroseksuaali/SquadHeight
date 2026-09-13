@@ -130,8 +130,9 @@ Post-processing is pure file I/O and Lua and is dispatched through UE4SS
 
 ## Map detection
 
-`maps.lua` contains the canonical SquadCalc minimap bounds used by SquadHeight,
-plus bounds for Chornivsk and HrodnaBorder. Runtime world names are matched by
+`maps.lua` contains the canonical SquadCalc minimap bounds used by SquadHeight.
+Mod and community maps are deliberately not listed there; add your own with
+`manual_bounds` as described below. Runtime world names are matched by
 canonical map-name substring, so layer worlds such as `Gorodok_*` resolve to
 `Gorodok`.
 
