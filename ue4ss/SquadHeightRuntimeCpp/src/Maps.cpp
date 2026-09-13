@@ -8,6 +8,10 @@ namespace SquadHeight
 namespace
 {
 constexpr std::array<MapDef, 60> Maps{{
+    // Bounds are {min_x, max_x, min_y, max_y} in meters (UE world XY).
+    //
+    // Vanilla Squad maps: canonical SquadCalc minimap bounds, identical to
+    // tools/squadcalc_bounds.json and ue4ss/SquadHeightRuntime/Scripts/maps.lua.
     {"AlBasrah", {-2000, 2000, -2000, 2000}},
     {"Anvil", {-2040, 1020, -2040, 1020}},
     {"Belaya", {-1954, 1950, -2080, 1825}},
@@ -35,9 +39,15 @@ constexpr std::array<MapDef, 60> Maps{{
     {"Sumari", {-640, 660, -447, 853}},
     {"Tallil", {-2340, 2340, -2340, 2340}},
     {"Yehorivka", {-3302, 3048, -3302, 3048}},
+    //
+    // Not from SquadCalc: hand-derived bounds, not verified against the
+    // SquadCalc minimap. Kept out of maps.lua for that reason.
     {"Chornivsk", {-1649, 1535, -1547, 1637}},
     {"Hrodna_Border", {-2016, 2016, -2016, 2016}},
     {"AlBasrah_legacy", {-1520, 1520, -1520, 1520}},
+    //
+    // ---- Modded / community maps start here ----
+    // Not part of SquadHeight's released data; bounds supplied by contributors.
     {"Bespin", {-2031.92, 2031.92, -2031.92, 2031.92}},
     {"Coruscant", {-2000, 2000, -2000, 2000}},
     {"Corvette", {-166.20, -6.65, -78.11, 81.44}},
@@ -64,6 +74,8 @@ constexpr std::array<MapDef, 60> Maps{{
     {"VenatorAssault", {-400.3, 399.7, -399.6, 400.4}},
     {"VenatorAssault2", {-855.4, 644.6, -462, 1038}},
     {"Yavin4", {-1260.02, 1260.02, -1260.02, 1260.02}},
+    // ---- End of modded / community maps ----
+    //
     // Extra aliases retained from the Lua backup / common runtime naming.
     {"HrodnaBorder", {-2015, 2015, -2015, 2016}},
     {"Hrodna", {-2016, 2016, -2016, 2016}},
