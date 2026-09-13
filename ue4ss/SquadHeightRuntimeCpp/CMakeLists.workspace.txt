@@ -1,0 +1,12 @@
+# Copy this file to the parent directory as CMakeLists.txt.
+# Expected layout:
+#   MyMods/
+#     CMakeLists.txt              <- this file, renamed
+#     RE-UE4SS/
+#     SquadHeightRuntimeCpp/
+
+cmake_minimum_required(VERSION 3.22)
+project(SquadHeightRuntimeWorkspace LANGUAGES C CXX)
+
+add_subdirectory(RE-UE4SS)
+add_subdirectory(SquadHeightRuntimeCpp)
