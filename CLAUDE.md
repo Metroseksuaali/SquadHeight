@@ -21,6 +21,20 @@ what a working session needs that the README doesn't.
   `heightmap_8bit.png` (preview renders, 16-bit is the real one),
   `meta.json` (bounds/resolution/orientation/z-offset + trace stats).
   `output/logs/squadheight_<date>.log` (gitignored) — the verbose run log.
+* `output/_terrain/<Map>/` — ground-only exports (`surface_mode:
+  "terrain_only"`, issue #8: landscape heightfield, every mesh ignored, for
+  3D modelling). `run_terrain_export.bat` / `SQUADHEIGHT_TERRAIN_ONLY=1`;
+  `build_release_zips.py --terrain`. Separate root so resume markers and
+  `scaling.json` never mix with surface exports; skips the collision settle.
+  `terrain_water: "surface"` (`run_terrain_export.bat water`,
+  `SQUADHEIGHT_TERRAIN_WATER=surface`) stops columns at water (ocean actors
+  `BP_Ocean*` + `/Environments/water/` meshes) instead of the seabed, into
+  `output/_terrain_water/`. That variant also attaches weather/lighting layers
+  named `*ocean*`/`*water*` (`batch_export._is_skipped_level`): Black Coast's
+  ocean lives only in `WeatherLayers/WL_BlackCoast_OpenOcean_Choppy` (7/9
+  gameplay layers) / `WL_Black_Coast_Water_Overcast`, which `_SUBLEVEL_SKIP`
+  drops — so the regular Black Coast surface export has NO ocean either (its
+  world Z min −31 m is the seabed).
 * `tools/sh_log.py` — the headless console/log layer all three editor scripts
   use. Two channels: a clean plain-English console (written to `CONOUT$`, the
   console screen buffer, which survives the runner redirecting the editor's

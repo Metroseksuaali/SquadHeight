@@ -89,7 +89,11 @@ without you babysitting the editor. Do this once per SDK/map update.
    `heightmap_8bit.png`, `heightmap_rb.png`, `meta.json`). A final
    `output/batch_report.json` lists every map with OK / failed and timing.
 
-6. **Check it before shipping (optional).** `squadcalc-test/` runs a local
+6. **Need the ground without buildings?** (e.g. for 3D modelling) Run
+   `run_terrain_export.bat` instead — see
+   [Ground-only (terrain) export](#ground-only-terrain-export).
+
+7. **Check it before shipping (optional).** `squadcalc-test/` runs a local
    copy of SquadCalc against these files so you can see the elevation on the
    real maps — see [squadcalc-test/README.md](squadcalc-test/README.md).
 
@@ -152,6 +156,7 @@ things follow from that, and matter when judging a map:
 
 ```
 run_batch_export.bat            headless batch export (edit paths at the top)
+run_terrain_export.bat          same, ground only (no buildings/meshes) -> output/_terrain/
 tools/
   export_heightmap.py           main exporter, runs inside the UE editor
   batch_export.py               loads each configured level and exports it
@@ -327,6 +332,65 @@ You can also run `py ".../tools/batch_export.py"` inside an open editor to
 batch without going headless (useful if level streaming misbehaves in
 commandlets).
 
+### Ground-only (terrain) export
+
+For 3D modelling, where buildings and trees are added on top, you can export
+the bare ground instead of the true surface. It records the Landscape
+heightfield only — buildings, bridges, walls and rock meshes are all ignored —
+but keeps everything else identical: the SquadCalc bounds, grid, orientation
+and all output files (JSON, 16-bit, 8-bit and R+B PNGs, `meta.json`), so a
+ground export lines up cell for cell with a regular one.
+
+**How to run it**
+
+1. Do steps 1–3 of the [Quick start](#quick-start--export-every-map-step-by-step)
+   (Python plugin, `settings.bat`, `tools/maps_config.json`). To export only
+   some maps, point `SQUADHEIGHT_CONFIG` in `settings.bat` at a copy of the
+   config that lists just those maps.
+2. Pick what water should read as, then run from the repo folder:
+   * `run_terrain_export.bat` — through the water down to the **seabed**
+     (double-clicking it does this).
+   * `run_terrain_export.bat water` — stop at the **water surface**, never
+     deeper.
+3. Collect the results from `output/_terrain/<Map>/` (seabed) or
+   `output/_terrain_water/<Map>/` (water surface). They never overwrite or
+   block the regular `output/<Map>/` export; `meta.json` records
+   `"surface_mode": "terrain_only"` and `"terrain_water"`.
+4. Optional: package them for a release with
+   `python tools/build_release_zips.py --terrain` (seabed, zips prefixed
+   `terrain_`) or `--terrain --water` (water surface, prefixed
+   `terrain_water_`).
+
+A Black Coast ground export at 1 m takes about 11 minutes — no collision
+settle is needed, since mesh collision is ignored anyway.
+
+Water is your choice (`terrain_water` in `CONFIG`, recorded in `meta.json`):
+
+| run | `terrain_water` | over water you get | output |
+|---|---|---|---|
+| `run_terrain_export.bat` | `seabed` (default) | the Landscape under the water | `output/_terrain/` |
+| `run_terrain_export.bat water` | `surface` | the water surface — the scan stops there, never deeper | `output/_terrain_water/` |
+
+(Env var equivalent: `SQUADHEIGHT_TERRAIN_WATER=surface`.) Water means ocean
+actors (`BP_Ocean*`) and water meshes under `/Environments/water/` (rivers,
+ponds); both lists are in `CONFIG` (`water_actor_class_prefixes`,
+`water_asset_path_keywords`). Land above the water line is the same in both.
+Some maps keep the ocean in a weather layer (Black Coast:
+`WeatherLayers/WL_BlackCoast_OpenOcean_Choppy`), which batch exports normally
+skip; in the water-surface variant, weather/lighting layers named
+`*ocean*`/`*water*` are attached too.
+
+* Where the minimap square has no Landscape (surround terrain built from
+  meshes), cells are hole-filled like any empty region — thin gaps from
+  neighbors, large areas with the minimum.
+* Heights are normalized to that export's own minimum; compare against a
+  surface export via `world_z = value + z_offset_m`.
+
+Without the `.bat`: set `SQUADHEIGHT_TERRAIN_ONLY=1` (and optionally
+`SQUADHEIGHT_TERRAIN_WATER=surface`) before `run_batch_export.bat`, or in an
+open editor with the level loaded run
+`export_heightmap.run_export(overrides={"surface_mode": "terrain_only", "terrain_water": "surface"})`.
+
 ## Adding a new map
 
 <details>
@@ -402,6 +466,8 @@ The ones that matter most:
   `terrain_under_overhang`: drops through any mesh with at least
   `overhang_min_clearance_m` of open space under it; correct under bridges
   but also drops building roofs to interior floors, so it's not the default.
+  `terrain_only`: Landscape ground only, no meshes at all — see
+  [Ground-only (terrain) export](#ground-only-terrain-export).
 * `grid_rotation_deg` — rotates the sample grid for maps whose minimap
   capture isn't world-axis-aligned. Every map listed in
   `squadcalc_bounds.json` is axis-aligned, so this stays 0 unless
