@@ -174,8 +174,28 @@ CONFIG = {
     #                             Bridges yield the road below; building roofs
     #                             with interior floors ALSO drop to the floors,
     #                             which is why "topmost" is the default.
+    #   "terrain_only"          - the Landscape heightfield ONLY: every mesh
+    #                             (buildings, bridges, rock meshes, the ocean
+    #                             volume) is ignored - like the stock SDK
+    #                             heightmap, but on the same bounds, grid and
+    #                             output files. For 3D modelling where the
+    #                             structures are added on top. Written to
+    #                             <output>/_terrain/<Map>/ so it never mixes
+    #                             with a surface export.
     # Tradeoff details in README.md.
     "surface_mode": "topmost",
+
+    # terrain_only only: what a column over water records.
+    #   "seabed"  - the Landscape under the water (DEFAULT).
+    #   "surface" - the water surface; the scan stops there and never goes
+    #               deeper. Land above the water line is unaffected. Written
+    #               to <output>/_terrain_water/<Map>/.
+    "terrain_water": "seabed",
+    # What counts as water for terrain_water "surface": ocean actors by class
+    # prefix (BP_Ocean_Squad_C, BP_Ocean_BlackCoast_C, BP_Ocean_C from the
+    # SQWater plugin) and river/lake/pond meshes by asset-path substring.
+    "water_actor_class_prefixes": ["BP_Ocean"],
+    "water_asset_path_keywords": ["/environments/water/", "/sqwater/"],
     "overhang_min_clearance_m": 2.5,
 
     # Reject hits whose upward normal Z is below this (1.0 = flat, 0.0 = wall).
@@ -192,6 +212,9 @@ CONFIG = {
     # Safety cap on hits processed per grid column (foliage stacks, multi-
     # storey buildings). Columns denser than this keep the best hit found.
     "max_hits_per_column": 16,
+    # terrain_only ignores meshes one actor at a time, so columns through
+    # multi-actor buildings need more traces before the landscape is reached.
+    "terrain_max_hits_per_column": 64,
 
     # ---- Output -----------------------------------------------------------
     # Subtract the minimum height so the lowest point is 0.00, matching the
@@ -230,6 +253,24 @@ CONFIG = {
 # UE works in centimeters.
 _M_TO_CM = 100.0
 _NO_DATA = float("nan")
+
+_SURFACE_MODES = ("topmost", "terrain_under_overhang", "terrain_only")
+_TERRAIN_WATER_MODES = ("seabed", "surface")
+
+# terrain_only exports live in their own root (one per water mode) so resume
+# markers, scaling.json and release packaging never mix variants. The leading
+# underscore keeps build_release_zips' map listing from treating it as a map.
+TERRAIN_OUTPUT_SUBDIR = "_terrain"
+TERRAIN_WATER_OUTPUT_SUBDIR = "_terrain_water"
+
+
+def map_output_root(output_root, surface_mode, terrain_water="seabed"):
+    """Folder that receives the <Map>/ subfolders for this export variant."""
+    if surface_mode != "terrain_only":
+        return output_root
+    if terrain_water == "surface":
+        return os.path.join(output_root, TERRAIN_WATER_OUTPUT_SUBDIR)
+    return os.path.join(output_root, TERRAIN_OUTPUT_SUBDIR)
 
 
 # ============================================================================
@@ -589,6 +630,22 @@ def _is_excluded_hit(actor, component, cfg):
     return False
 
 
+def _is_water_hit(actor, component, cfg):
+    """Ocean volume actor or water mesh - see CONFIG water_* keys."""
+    if actor is not None:
+        actor_class = actor.get_class().get_name()
+        if any(actor_class.startswith(p)
+               for p in cfg.get("water_actor_class_prefixes", ())):
+            return True
+    keywords = cfg.get("water_asset_path_keywords", ())
+    if keywords and isinstance(component, unreal.StaticMeshComponent):
+        mesh = component.static_mesh
+        if mesh is not None:
+            path = mesh.get_path_name().lower()
+            return any(kw.lower() in path for kw in keywords)
+    return False
+
+
 # ============================================================================
 # Tracing
 # ============================================================================
@@ -613,10 +670,15 @@ class _Tracer(object):
         self.clearance = cfg["overhang_min_clearance_m"] * _M_TO_CM
         self.min_normal_z = cfg["walkable_min_normal_z"]
         self.topmost_mode = cfg["surface_mode"] == "topmost"
+        self.terrain_only = cfg["surface_mode"] == "terrain_only"
+        self.water_surface = cfg.get("terrain_water") == "surface"
+        self.terrain_max_hits = cfg.get("terrain_max_hits_per_column", 64)
         self.debug_none = unreal.DrawDebugTrace.NONE
         # stats
         self.foliage_skips = 0
         self.overhang_drops = 0
+        self.terrain_mesh_skips = 0
+        self.water_cells = 0
         # Histogram of which mesh assets the chosen structure hits landed on.
         # This is how you find foliage that slips through the filters: leaked
         # tree canopies show up at the top of this list in meta.json, and
@@ -640,18 +702,58 @@ class _Tracer(object):
             pass
         self.mesh_counts[path] = self.mesh_counts.get(path, 0) + 1
 
-    def _trace_once(self, x, y, z_start):
+    def _trace_once(self, x, y, z_start, ignore=None):
         start = unreal.Vector(x, y, z_start)
         end = unreal.Vector(x, y, self.z_bottom)
+        if ignore is None:
+            ignore = self.ignore
         if self.by_profile:
             return unreal.SystemLibrary.line_trace_single_by_profile(
                 self.world, start, end, self.profile, self.trace_complex,
-                self.ignore, self.debug_none, True,
+                ignore, self.debug_none, True,
             )
         return unreal.SystemLibrary.line_trace_single(
             self.world, start, end, self.channel, self.trace_complex,
-            self.ignore, self.debug_none, True,
+            ignore, self.debug_none, True,
         )
+
+    def _sample_terrain_column(self, x, y):
+        """
+        terrain_only: return (landscape_z_cm or None, same, False). With
+        terrain_water "surface" the first water hit ends the column instead,
+        so the scan never goes below the water surface.
+
+        Every non-landscape actor the ray hits joins a per-column ignore list
+        and the ray is cast again from the same start, instead of restarting
+        just below the hit - a restart inside a thick convex collision would
+        report an initial overlap and crawl down in epsilon steps. Hits that
+        can't be ignored by actor (landscape grass instances, actor-less
+        components) step below the hit instead.
+        """
+        ignore = self.ignore
+        z_start = self.z_top
+        for _ in range(self.terrain_max_hits):
+            hit = self._trace_once(x, y, z_start, ignore)
+            if not hit:
+                break
+            location, _normal, actor, component = _parse_hit(hit)
+            if location is None:
+                break
+            if _is_landscape_ground(actor, component):
+                return location.z, location.z, False
+            if self.water_surface and _is_water_hit(actor, component, self.cfg):
+                self.water_cells += 1
+                return location.z, location.z, False
+            self.terrain_mesh_skips += 1
+            if actor is not None and not isinstance(actor, _landscape_class()):
+                if ignore is self.ignore:
+                    ignore = list(self.ignore)
+                ignore.append(actor)
+            else:
+                z_start = location.z - self.epsilon
+                if z_start <= self.z_bottom:
+                    break
+        return None, None, False
 
     def sample_column(self, x, y):
         """
@@ -663,6 +765,9 @@ class _Tracer(object):
         upward-facing geometry, so each accepted hit is a stackable "floor"
         (bridge deck, roof, terrain) - undersides are never reported.
         """
+        if self.terrain_only:
+            return self._sample_terrain_column(x, y)
+
         surfaces = []        # [(z_cm, is_landscape)]
         landscape_z = None
         z_start = self.z_top
@@ -886,6 +991,15 @@ def run_export(output_dir=None, map_name=None, overrides=None,
             else:
                 cfg[k] = v
 
+    if cfg["surface_mode"] not in _SURFACE_MODES:
+        raise ValueError("Unknown surface_mode %r (expected one of %s)"
+                         % (cfg["surface_mode"], ", ".join(_SURFACE_MODES)))
+    terrain_only = cfg["surface_mode"] == "terrain_only"
+    if cfg.get("terrain_water", "seabed") not in _TERRAIN_WATER_MODES:
+        raise ValueError("Unknown terrain_water %r (expected one of %s)"
+                         % (cfg["terrain_water"], ", ".join(_TERRAIN_WATER_MODES)))
+    water_surface = terrain_only and cfg["terrain_water"] == "surface"
+
     world = get_editor_world()
     if map_name is None:
         map_name = world.get_name()
@@ -893,14 +1007,18 @@ def run_export(output_dir=None, map_name=None, overrides=None,
 
     if output_dir is None:
         output_dir = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", "output"))
+    log = sh_log.ensure_session(output_dir)
+    output_dir = map_output_root(output_dir, cfg["surface_mode"],
+                                 cfg["terrain_water"])
     map_dir = os.path.join(output_dir, map_name)
     if not os.path.isdir(map_dir):
         os.makedirs(map_dir)
 
-    log = sh_log.ensure_session(output_dir)
-    log.phase("%sExporting %s @ %.2f m"
+    log.phase("%sExporting %s @ %.2f m%s"
               % (progress_label + " " if progress_label else "",
-                 map_name, cfg["resolution_m"]))
+                 map_name, cfg["resolution_m"],
+                 (" (terrain only, water surface)" if water_surface
+                  else " (terrain only)" if terrain_only else "")))
 
     # ---- Bounds and grid ---------------------------------------------------
     min_x, max_x, min_y, max_y, min_z, max_z = compute_bounds(world, cfg)
@@ -945,12 +1063,18 @@ def run_export(output_dir=None, map_name=None, overrides=None,
 
     tracer = _Tracer(world, cfg, ignore_actors, z_top, z_bottom)
 
-    log.step("Settling async collision (finishing mesh compilation)...")
-    settle_rounds, settle_hits = _settle_async_collision(
-        world, tracer, n_cols, n_rows, step, half_u, half_v,
-        center_x, center_y, cos_r, sin_r)
-    log.step("Collision settled: %s structure hits in sparse pre-scan "
-             "(%d round(s))" % (sh_log.fmt_count(settle_hits), settle_rounds))
+    if terrain_only:
+        # Mesh collision is ignored anyway, so meshes left un-finalized by
+        # async compilation can't change the result - no settle needed.
+        settle_rounds, settle_hits = 0, 0
+        log.step("Terrain only: meshes ignored, skipping collision settle")
+    else:
+        log.step("Settling async collision (finishing mesh compilation)...")
+        settle_rounds, settle_hits = _settle_async_collision(
+            world, tracer, n_cols, n_rows, step, half_u, half_v,
+            center_x, center_y, cos_r, sin_r)
+        log.step("Collision settled: %s structure hits in sparse pre-scan "
+                 "(%d round(s))" % (sh_log.fmt_count(settle_hits), settle_rounds))
 
     rows = []
     no_hit = 0
@@ -1146,6 +1270,8 @@ def run_export(output_dir=None, map_name=None, overrides=None,
             "collision_settle_sparse_hits": settle_hits,
             "foliage_hits_skipped": tracer.foliage_skips,
             "overhang_drops": tracer.overhang_drops,
+            "terrain_mesh_hits_skipped": tracer.terrain_mesh_skips,
+            "terrain_water_cells": tracer.water_cells,
             "ignored_foliage_actors": len(ignore_actors),
         },
         # Top mesh assets by cells - check this when verifying foliage
@@ -1157,6 +1283,8 @@ def run_export(output_dir=None, map_name=None, overrides=None,
                                key=lambda kv: -kv[1])[:40]
         ],
     }
+    if terrain_only:
+        meta["terrain_water"] = cfg["terrain_water"]  # "seabed" or "surface"
     with open(os.path.join(map_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
     _update_scaling_recap(output_dir, map_name,

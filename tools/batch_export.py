@@ -55,11 +55,13 @@ def _find_config_path():
     )
 
 
-def _load_level(level_path):
+def _load_level(level_path, keep_water_layers=False):
     """
     Open a level by package path (e.g. '/Game/Maps/Chora/Chora').
     EditorLoadingAndSavingUtils works in UE4.27, UE5 AND in the pythonscript
     commandlet; LevelEditorSubsystem is tried first on UE5 for good measure.
+    keep_water_layers: also attach weather/lighting layers that carry the
+    ocean (see _WATER_LAYER_NAME_KEYWORDS).
     """
     loaded = False
     try:
@@ -71,8 +73,8 @@ def _load_level(level_path):
     if not loaded:
         loaded = bool(unreal.EditorLoadingAndSavingUtils.load_map(level_path))
     if loaded:
-        _force_load_sublevels(level_path)
-        _ensure_levels_visible(level_path)
+        _force_load_sublevels(level_path, keep_water_layers)
+        _ensure_levels_visible(level_path, keep_water_layers)
     return loaded
 
 
@@ -106,8 +108,29 @@ _SUBLEVEL_SKIP = (
     "sanxian_islands_geo",  # stale whole-map snapshot, not streamed by the game
 )
 
+# Some maps keep their ocean (BP_Ocean from SQWater) in a weather layer
+# (Black Coast: WeatherLayers/WL_BlackCoast_OpenOcean_Choppy), which the skip
+# list above drops. The water-surface terrain export needs it, so a level
+# skipped ONLY for being a weather/lighting layer is kept when its name says
+# ocean/water. Other layer content is irrelevant there: terrain_only ignores
+# every non-landscape, non-water hit.
+_WEATHER_LAYER_SKIPS = ("/weatherlayer", "/wl_", "/lighting_layer", "/ll_")
+_WATER_LAYER_NAME_KEYWORDS = ("ocean", "water")
 
-def _find_sublevel_worlds(level_path):
+
+def _is_skipped_level(pkg, keep_water_layers=False):
+    low = pkg.lower()
+    hits = [k for k in _SUBLEVEL_SKIP if k in low]
+    if not hits:
+        return False
+    if keep_water_layers and all(k in _WEATHER_LAYER_SKIPS for k in hits):
+        name = low.rsplit("/", 1)[-1]
+        if any(k in name for k in _WATER_LAYER_NAME_KEYWORDS):
+            return False
+    return True
+
+
+def _find_sublevel_worlds(level_path, keep_water_layers=False):
     """
     World assets that belong to the map, via the asset registry. Works even
     when UWorld.streaming_levels is not exposed to Python (e.g. Squad's
@@ -136,12 +159,12 @@ def _find_sublevel_worlds(level_path):
         name = w.rsplit("/", 1)[-1].lower()
         if name.startswith("l_000_master"):
             return False  # sibling master variants
-        return not any(k in w.lower() for k in _SUBLEVEL_SKIP)
+        return not _is_skipped_level(w, keep_water_layers)
 
     return [w for w in worlds if wanted(w)]
 
 
-def _force_load_sublevels(level_path):
+def _force_load_sublevels(level_path, keep_water_layers=False):
     """
     Map content can live in streaming sublevels that commandlets do not load:
     towns in <Map>/Levels/ (Black Coast), Art_Layers (Manicouagan), 070_
@@ -152,7 +175,14 @@ def _force_load_sublevels(level_path):
     EditorLevelUtils.add_level_to_world as always-loaded.
     """
     world = _get_world()
-    subs = _find_sublevel_worlds(level_path)
+    subs = _find_sublevel_worlds(level_path, keep_water_layers)
+    if keep_water_layers:
+        water = [w for w in subs if _is_skipped_level(w)]
+        if water:
+            sh_log.get().detail("keeping water layers: %s" % ", ".join(water))
+        else:
+            sh_log.get().detail("no ocean/water weather layer found for %s"
+                                % level_path)
     if not subs:
         if _landscape_count(world) == 0:
             sh_log.get().warn("no landscape AND no sublevel worlds found next "
@@ -197,7 +227,7 @@ def _force_load_sublevels(level_path):
                         % (added, len(to_add), _landscape_count(world)))
 
 
-def _ensure_levels_visible(level_path):
+def _ensure_levels_visible(level_path, keep_water_layers=False):
     """
     Hidden editor levels have NO collision: some masters (Mutaha, Narva)
     load their sublevels but keep them hidden, which leaves a scan with
@@ -215,7 +245,7 @@ def _ensure_levels_visible(level_path):
         name = pkg.rsplit("/", 1)[-1].lower()
         if pkg == level_path or name.startswith("l_000_master"):
             continue
-        if any(k in pkg.lower() for k in _SUBLEVEL_SKIP):
+        if _is_skipped_level(pkg, keep_water_layers):
             continue  # whitebox/old/lighting variants stay hidden
         targets.append(lvl)
     if not targets:
@@ -265,10 +295,23 @@ def main():
     # the run that finds every map already exported.
     one_map = bool(os.environ.get("SQUADHEIGHT_ONE_MAP"))
 
+    # Terrain-only mode: landscape heightfield without any meshes, written
+    # to <output_root>/_terrain/<Map>/ (run_terrain_export.bat sets this).
+    # Wins over any surface_mode in the config.
+    terrain_only = bool(os.environ.get("SQUADHEIGHT_TERRAIN_ONLY"))
+    # SQUADHEIGHT_TERRAIN_WATER=surface stops terrain columns at the water
+    # surface instead of the seabed (output goes to _terrain_water/).
+    terrain_water = os.environ.get("SQUADHEIGHT_TERRAIN_WATER", "").strip().lower()
+    if terrain_water not in ("", "seabed", "surface"):
+        raise RuntimeError("SQUADHEIGHT_TERRAIN_WATER must be 'seabed' or "
+                           "'surface', got %r" % terrain_water)
+
     log = sh_log.start_session(
         output_root,
-        "Batch export: %d map(s) -> %s%s"
+        "Batch export: %d map(s) -> %s%s%s"
         % (len(maps), output_root,
+           ("  (terrain only, water: %s)" % (terrain_water or "seabed"))
+           if terrain_only else "",
            "  (one map per editor run)" if one_map else ""))
 
     report = []
@@ -288,10 +331,19 @@ def main():
                 overrides["trace"] = merged
             else:
                 overrides[k] = v
+        if terrain_only:
+            overrides["surface_mode"] = "terrain_only"
+        if terrain_water:
+            overrides["terrain_water"] = terrain_water
 
         # Resume support: skip maps that already have a finished export
         # (delete the map's output folder, or set SQUADHEIGHT_FORCE=1, to redo).
-        done_marker = os.path.join(output_root, name or level.rsplit("/", 1)[-1],
+        cfg = export_heightmap.CONFIG
+        surface_mode = overrides.get("surface_mode", cfg["surface_mode"])
+        water_mode = overrides.get("terrain_water", cfg["terrain_water"])
+        map_root = export_heightmap.map_output_root(
+            output_root, surface_mode, water_mode)
+        done_marker = os.path.join(map_root, name or level.rsplit("/", 1)[-1],
                                    "meta.json")
         label = "[%d/%d]" % (i + 1, len(maps))
         if os.path.isfile(done_marker) and not os.environ.get("SQUADHEIGHT_FORCE"):
@@ -302,7 +354,9 @@ def main():
         log.detail("%s loading level %s" % (label, level))
         t_map = time.time()
         try:
-            if not _load_level(level):
+            keep_water = (surface_mode == "terrain_only"
+                          and water_mode == "surface")
+            if not _load_level(level, keep_water):
                 raise RuntimeError("load_map returned false for %s" % level)
             out_dir = export_heightmap.run_export(
                 output_dir=output_root, map_name=name, overrides=overrides,

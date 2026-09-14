@@ -7,6 +7,10 @@ REM
 REM  The console shows only SquadHeight's clean phase/progress view; the
 REM  engine's own (very noisy) log is redirected to a file under output\logs.
 REM  Set SQUADHEIGHT_VERBOSE=1 to stream the raw engine log to the console.
+REM  Set SQUADHEIGHT_TERRAIN_ONLY=1 (or use run_terrain_export.bat) to export
+REM  the landscape ground only, without buildings/meshes, to output\_terrain.
+REM  Add SQUADHEIGHT_TERRAIN_WATER=surface to stop at the water surface instead
+REM  of the seabed (output\_terrain_water).
 REM ============================================================================
 
 set "RC=0"
@@ -34,6 +38,13 @@ set "ENGINE_LOG=%LOGDIR%\engine_batch_%TS%.log"
 set "SH_LOG=%LOGDIR%\squadheight_%TS:~0,8%.log"
 
 echo [SquadHeight] Starting headless batch export...
+if not defined SQUADHEIGHT_TERRAIN_ONLY goto :mode_shown
+if /i "%SQUADHEIGHT_TERRAIN_WATER%"=="surface" (
+    echo [SquadHeight] Terrain only, stopping at the water surface -^> output\_terrain_water
+) else (
+    echo [SquadHeight] Terrain only, water down to the seabed -^> output\_terrain
+)
+:mode_shown
 echo [SquadHeight] Clean progress shows below. Detailed logs are written to:
 echo [SquadHeight]     %SH_LOG%   (SquadHeight: phases + per-map detail)
 echo [SquadHeight]     %ENGINE_LOG%   (raw engine log, all editor runs appended)
