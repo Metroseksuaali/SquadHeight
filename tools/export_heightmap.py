@@ -196,6 +196,27 @@ CONFIG = {
     # SQWater plugin) and river/lake/pond meshes by asset-path substring.
     "water_actor_class_prefixes": ["BP_Ocean"],
     "water_asset_path_keywords": ["/environments/water/", "/sqwater/"],
+
+    # terrain_only: static meshes that ARE terrain, matched case-insensitively
+    # against the mesh asset path. Many maps build their out-of-play
+    # surroundings from meshes rather than Landscape; without these the
+    # mountains around the map vanish from a ground export.
+    #   ground_mesh - counts exactly like Landscape (first hit from the top
+    #                 wins), so a surround mountain standing on the landscape
+    #                 edge keeps its shape. Gorodok/Harju/Kamdesh/Manicouagan/
+    #                 Narva/Yehorivka SurroundMountains, Lashkar's mountain,
+    #                 Tallil's background terrain, Anvil's surround cliffs.
+    #   baked_landscape - mesh copies of the Landscape (Chora's surround
+    #                 mountains are ONLY this: Terrain/SM_LandscapeStreaming
+    #                 Proxy_0_LOD1; Sumari too). They overlap the real
+    #                 landscape at a coarser LOD, so they are used only where
+    #                 the ray finds no Landscape below.
+    # exclude_asset_path_keywords still wins (e.g. Al Basrah's SurroundMesh).
+    "terrain_ground_mesh_keywords": [
+        "/surroundmountains/", "/surround_meshes/", "background_terrain",
+        "/lashkar_valley/assets/mountain/",
+    ],
+    "terrain_baked_landscape_keywords": ["sm_landscapestreamingproxy"],
     "overhang_min_clearance_m": 2.5,
 
     # Reject hits whose upward normal Z is below this (1.0 = flat, 0.0 = wall).
@@ -495,6 +516,10 @@ def _settle_async_collision(world, tracer, n_cols, n_rows, step,
     stride_c = max(1, n_cols // 64)
 
     def sparse_structure_count():
+        # terrain_only never reports structures, but its terrain meshes
+        # (baked landscape copies, surround mountains) suffer the same
+        # missing collision - count every mesh hit there instead.
+        mesh_hits_before = tracer.terrain_mesh_hits
         n = 0
         for r in range(0, n_rows, stride_r):
             v = r * step - half_v
@@ -505,6 +530,8 @@ def _settle_async_collision(world, tracer, n_cols, n_rows, step,
                 z, _landscape_z, is_structure = tracer.sample_column(x, y)
                 if z is not None and is_structure:
                     n += 1
+        if tracer.terrain_only:
+            n = tracer.terrain_mesh_hits - mesh_hits_before
         return n
 
     prev = -1
@@ -530,6 +557,9 @@ def _settle_async_collision(world, tracer, n_cols, n_rows, step,
     # meta.json reflects the real scan only.
     tracer.mesh_counts = {}
     tracer.foliage_skips = 0
+    tracer.terrain_mesh_hits = tracer.terrain_mesh_skips = 0
+    tracer.water_cells = tracer.ground_mesh_cells = 0
+    tracer.baked_landscape_cells = 0
     return rounds, n
 
 
@@ -646,6 +676,26 @@ def _is_water_hit(actor, component, cfg):
     return False
 
 
+def _terrain_mesh_kind(actor, component, cfg):
+    """'ground', 'baked' or None for a terrain_only hit - see CONFIG."""
+    if not isinstance(component, unreal.StaticMeshComponent):
+        return None
+    mesh = component.static_mesh
+    if mesh is None:
+        return None
+    path = mesh.get_path_name().lower()
+    if any(kw.lower() in path for kw in cfg.get("terrain_ground_mesh_keywords", ())):
+        kind = "ground"
+    elif any(kw.lower() in path
+             for kw in cfg.get("terrain_baked_landscape_keywords", ())):
+        kind = "baked"
+    else:
+        return None
+    if _is_excluded_hit(actor, component, cfg):
+        return None
+    return kind
+
+
 # ============================================================================
 # Tracing
 # ============================================================================
@@ -679,6 +729,9 @@ class _Tracer(object):
         self.overhang_drops = 0
         self.terrain_mesh_skips = 0
         self.water_cells = 0
+        self.ground_mesh_cells = 0
+        self.baked_landscape_cells = 0
+        self.terrain_mesh_hits = 0  # every non-landscape hit (settle check)
         # Histogram of which mesh assets the chosen structure hits landed on.
         # This is how you find foliage that slips through the filters: leaked
         # tree canopies show up at the top of this list in meta.json, and
@@ -719,9 +772,11 @@ class _Tracer(object):
 
     def _sample_terrain_column(self, x, y):
         """
-        terrain_only: return (landscape_z_cm or None, same, False). With
-        terrain_water "surface" the first water hit ends the column instead,
-        so the scan never goes below the water surface.
+        terrain_only: return (ground_z_cm or None, same, False). Ground is
+        Landscape or a terrain_ground_mesh (first one from the top wins); a
+        baked landscape mesh is used only when no Landscape lies below it.
+        With terrain_water "surface" the first water hit ends the column
+        instead, so the scan never goes below the water surface.
 
         Every non-landscape actor the ray hits joins a per-column ignore list
         and the ray is cast again from the same start, instead of restarting
@@ -732,6 +787,7 @@ class _Tracer(object):
         """
         ignore = self.ignore
         z_start = self.z_top
+        baked_z = None
         for _ in range(self.terrain_max_hits):
             hit = self._trace_once(x, y, z_start, ignore)
             if not hit:
@@ -741,10 +797,19 @@ class _Tracer(object):
                 break
             if _is_landscape_ground(actor, component):
                 return location.z, location.z, False
+            self.terrain_mesh_hits += 1
             if self.water_surface and _is_water_hit(actor, component, self.cfg):
                 self.water_cells += 1
                 return location.z, location.z, False
-            self.terrain_mesh_skips += 1
+            kind = _terrain_mesh_kind(actor, component, self.cfg)
+            if kind == "ground":
+                self.ground_mesh_cells += 1
+                return location.z, location.z, False
+            if kind == "baked":
+                if baked_z is None:
+                    baked_z = location.z
+            else:
+                self.terrain_mesh_skips += 1
             if actor is not None and not isinstance(actor, _landscape_class()):
                 if ignore is self.ignore:
                     ignore = list(self.ignore)
@@ -753,6 +818,9 @@ class _Tracer(object):
                 z_start = location.z - self.epsilon
                 if z_start <= self.z_bottom:
                     break
+        if baked_z is not None:
+            self.baked_landscape_cells += 1
+            return baked_z, baked_z, False
         return None, None, False
 
     def sample_column(self, x, y):
@@ -1063,18 +1131,17 @@ def run_export(output_dir=None, map_name=None, overrides=None,
 
     tracer = _Tracer(world, cfg, ignore_actors, z_top, z_bottom)
 
-    if terrain_only:
-        # Mesh collision is ignored anyway, so meshes left un-finalized by
-        # async compilation can't change the result - no settle needed.
-        settle_rounds, settle_hits = 0, 0
-        log.step("Terrain only: meshes ignored, skipping collision settle")
-    else:
-        log.step("Settling async collision (finishing mesh compilation)...")
-        settle_rounds, settle_hits = _settle_async_collision(
-            world, tracer, n_cols, n_rows, step, half_u, half_v,
-            center_x, center_y, cos_r, sin_r)
-        log.step("Collision settled: %s structure hits in sparse pre-scan "
-                 "(%d round(s))" % (sh_log.fmt_count(settle_hits), settle_rounds))
+    # Needed in terrain_only too: terrain meshes (Chora's whole surroundings
+    # are a baked landscape mesh) lose their collision exactly like buildings
+    # when async compilation is never finalized - a first terrain export
+    # without the settle got 0 hits on it.
+    log.step("Settling async collision (finishing mesh compilation)...")
+    settle_rounds, settle_hits = _settle_async_collision(
+        world, tracer, n_cols, n_rows, step, half_u, half_v,
+        center_x, center_y, cos_r, sin_r)
+    log.step("Collision settled: %s %s hits in sparse pre-scan (%d round(s))"
+             % (sh_log.fmt_count(settle_hits),
+                "mesh" if terrain_only else "structure", settle_rounds))
 
     rows = []
     no_hit = 0
@@ -1272,6 +1339,8 @@ def run_export(output_dir=None, map_name=None, overrides=None,
             "overhang_drops": tracer.overhang_drops,
             "terrain_mesh_hits_skipped": tracer.terrain_mesh_skips,
             "terrain_water_cells": tracer.water_cells,
+            "terrain_ground_mesh_cells": tracer.ground_mesh_cells,
+            "terrain_baked_landscape_cells": tracer.baked_landscape_cells,
             "ignored_foliage_actors": len(ignore_actors),
         },
         # Top mesh assets by cells - check this when verifying foliage

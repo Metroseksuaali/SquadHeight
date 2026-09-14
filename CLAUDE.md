@@ -22,10 +22,17 @@ what a working session needs that the README doesn't.
   `meta.json` (bounds/resolution/orientation/z-offset + trace stats).
   `output/logs/squadheight_<date>.log` (gitignored) — the verbose run log.
 * `output/_terrain/<Map>/` — ground-only exports (`surface_mode:
-  "terrain_only"`, issue #8: landscape heightfield, every mesh ignored, for
-  3D modelling). `run_terrain_export.bat` / `SQUADHEIGHT_TERRAIN_ONLY=1`;
+  "terrain_only"`, issue #8: landscape heightfield, every non-terrain mesh
+  ignored, for 3D modelling). Terrain meshes are NOT optional: Chora's
+  surroundings exist only as the baked mesh `Terrain/SM_LandscapeStreaming
+  Proxy_0_LOD1` (11M of its cells) and many maps use `/SurroundMountains/`
+  meshes — a landscape-only export lost them (sh4rkman's first report).
+  `terrain_ground_mesh_keywords` = ground (topmost wins),
+  `terrain_baked_landscape_keywords` = only where no Landscape is below. `run_terrain_export.bat` / `SQUADHEIGHT_TERRAIN_ONLY=1`;
   `build_release_zips.py --terrain`. Separate root so resume markers and
-  `scaling.json` never mix with surface exports; skips the collision settle.
+  `scaling.json` never mix with surface exports. Still runs the collision
+  settle (gotcha 9 hits terrain meshes too: without it Chora's baked mesh got
+  0 hits); in terrain mode it counts mesh hits instead of structures.
   `terrain_water: "surface"` (`run_terrain_export.bat water`,
   `SQUADHEIGHT_TERRAIN_WATER=surface`) stops columns at water (ocean actors
   `BP_Ocean*` + `/Environments/water/` meshes) instead of the seabed, into
