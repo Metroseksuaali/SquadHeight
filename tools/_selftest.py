@@ -328,6 +328,129 @@ check("Chora keeps folder-named", best_level([
     "/Game/Maps/Chora/Sublevels/L_000_Master_Chora_Navmesh",
 ]) == "/Game/Maps/Chora/Chora")
 
+# ---- terrain_only: landscape heightfield under meshes ------------------------
+# Fake world: one column of (z_cm, actor, component) surfaces. The fake trace
+# returns the highest surface below the start that is not on an ignored actor.
+class _Landscape(object):
+    pass
+
+
+class _Ism(object):
+    pass
+
+
+unreal_stub.LandscapeProxy = _Landscape
+unreal_stub.InstancedStaticMeshComponent = _Ism
+_orig_parse_hit = eh._parse_hit
+eh._parse_hit = lambda hit: (hit[0], None, hit[1], hit[2])
+
+
+class _Loc(object):
+    def __init__(self, z):
+        self.z = z
+
+
+def terrain_sample(surfaces, ignore=None, water="seabed"):
+    tr = object.__new__(eh._Tracer)
+    tr.cfg = dict(eh.CONFIG, terrain_water=water)
+    tr.ignore = ignore if ignore is not None else []
+    tr.z_top, tr.z_bottom, tr.epsilon = 10000.0, -10000.0, 5.0
+    tr.terrain_only, tr.terrain_max_hits, tr.terrain_mesh_skips = True, 64, 0
+    tr.water_surface, tr.water_cells = water == "surface", 0
+
+    def fake_trace(x, y, z_start, ign=None):
+        ign = tr.ignore if ign is None else ign
+        for z, actor, comp in sorted(surfaces, key=lambda t: -t[0]):
+            if z <= z_start and actor not in ign:
+                return (_Loc(z), actor, comp)
+        return None
+    tr._trace_once = fake_trace
+    return tr.sample_column(0.0, 0.0), tr
+
+
+land = _Landscape()
+house, roof = object(), object()
+(z, lz, is_struct), tr = terrain_sample(
+    [(1000.0, house, None), (900.0, roof, None), (950.0, house, None),
+     (500.0, land, None)])
+check("terrain_only: ground under building", (z, lz, is_struct) == (500.0, 500.0, False))
+check("terrain_only: one skip per actor", tr.terrain_mesh_skips == 2,
+      str(tr.terrain_mesh_skips))
+(z, _, _), _ = terrain_sample([(520.0, land, _Ism()), (500.0, land, None)])
+check("terrain_only: landscape grass stepped past", z == 500.0, str(z))
+(z, lz, _), _ = terrain_sample([(800.0, house, None)])
+check("terrain_only: no landscape -> hole", z is None and lz is None)
+shared_ignore = []
+terrain_sample([(800.0, house, None), (100.0, land, None)], shared_ignore)
+check("terrain_only: base ignore list untouched", shared_ignore == [])
+check("terrain output root", eh.map_output_root("out", "terrain_only")
+      == os.path.join("out", "_terrain") and eh.map_output_root("out", "topmost") == "out")
+check("terrain water output root",
+      eh.map_output_root("out", "terrain_only", "surface")
+      == os.path.join("out", "_terrain_water")
+      and eh.map_output_root("out", "topmost", "surface") == "out")
+
+
+class _Named(object):
+    def __init__(self, name):
+        self._name = name
+
+    def get_class(self):
+        return self
+
+    def get_name(self):
+        return self._name
+
+
+class _Mesh(object):
+    def __init__(self, path):
+        self._path = path
+
+    def get_path_name(self):
+        return self._path
+
+
+class _Smc(unreal_stub.StaticMeshComponent):
+    def __init__(self, path):
+        self.static_mesh = _Mesh(path)
+
+
+ocean = _Named("BP_Ocean_Squad_C")
+river = _Named("StaticMeshActor")
+river_mesh = _Smc("/Game/Environments/water/meshes/SM_env_river.SM_env_river")
+pier = _Named("BP_Pier_C")
+sea_col = [(1200.0, pier, _Smc("/Game/Environments/Generic/Dock.Dock")),
+           (0.0, ocean, None), (-900.0, land, None)]
+(z, _, _), tr = terrain_sample(sea_col, water="seabed")
+check("terrain water seabed: goes through the sea", z == -900.0, str(z))
+(z, _, _), tr = terrain_sample(sea_col, water="surface")
+check("terrain water surface: stops at the sea, not the pier", z == 0.0, str(z))
+check("terrain water surface: counted", tr.water_cells == 1)
+(z, _, _), _ = terrain_sample([(300.0, river, river_mesh), (100.0, land, None)],
+                              water="surface")
+check("terrain water surface: river mesh by path", z == 300.0, str(z))
+(z, _, _), _ = terrain_sample([(800.0, land, None), (0.0, ocean, None)],
+                              water="surface")
+check("terrain water surface: land above the water line wins", z == 800.0, str(z))
+(z, _, _), _ = terrain_sample(
+    [(500.0, _Named("BP_WaterTower_C"),
+      _Smc("/Game/Environments/Industrial/WaterTower.WaterTower")),
+     (100.0, land, None)], water="surface")
+check("terrain water surface: water tower is not water", z == 100.0, str(z))
+eh._parse_hit = _orig_parse_hit
+
+# ---- batch_export: ocean weather layers kept only for water-surface terrain --
+import batch_export as be  # noqa: E402
+
+wl_ocean = "/BlackCoast/Maps/WeatherLayers/WL_BlackCoast_OpenOcean_Choppy"
+check("ocean weather layer skipped by default", be._is_skipped_level(wl_ocean))
+check("ocean weather layer kept for water surface",
+      not be._is_skipped_level(wl_ocean, keep_water_layers=True))
+check("plain lighting layer still skipped for water surface",
+      be._is_skipped_level("/BlackCoast/Maps/Lighting_Layers/LL_Black_Coast_Night", True))
+check("gameplay 'water' layer still skipped for water surface",
+      be._is_skipped_level("/BlackCoast/Maps/Gameplay_Layers/BlackCoast_Water_AAS", True))
+
 print()
 if failures:
     print("FAILED: %d check(s): %s" % (len(failures), ", ".join(failures)))
