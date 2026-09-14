@@ -57,8 +57,9 @@ SquadHeight - ground-only (terrain) heightmaps for Squad maps
 
 What this is
 ------------
-The Landscape heightfield of each map with NO meshes at all: buildings,
-bridges, walls and rock/cliff meshes are ignored, so the values are the bare
+The terrain of each map only: the Landscape heightfield plus the meshes the
+map uses as terrain (surround mountains, baked landscape copies). Buildings,
+bridges, walls, rocks and props are ignored, so the values are the bare
 ground. {water}
 
 Meant as a base for 3D modelling where structures are added on top - NOT for
@@ -125,10 +126,10 @@ What the values mean at the edges
 EDGES_TERRAIN = """\
 What the values mean at the edges
 ---------------------------------
-* Only the Landscape counts. Where the minimap square has no Landscape
-  underneath (surround terrain built from meshes, open sea without a seabed
-  landscape), thin gaps are filled from their neighbours and larger empty
-  regions read as the map minimum (0). No terrain is invented.
+* Only terrain counts. Where the minimap square has no terrain underneath
+  (e.g. open sea without a seabed), thin gaps are filled from their
+  neighbours and larger empty regions read as the map minimum (0). No
+  terrain is invented.
 """
 
 WATER_SEABED = "Water is ignored too: under water the value is the seabed."

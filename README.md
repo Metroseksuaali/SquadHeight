@@ -335,9 +335,10 @@ commandlets).
 ### Ground-only (terrain) export
 
 For 3D modelling, where buildings and trees are added on top, you can export
-the bare ground instead of the true surface. It records the Landscape
-heightfield only — buildings, bridges, walls and rock meshes are all ignored —
-but keeps everything else identical: the SquadCalc bounds, grid, orientation
+the bare ground instead of the true surface. It records the terrain only —
+the Landscape heightfield plus the meshes maps use as terrain (see below) —
+while buildings, bridges, walls, rocks and props are all ignored. Everything
+else stays identical: the SquadCalc bounds, grid, orientation
 and all output files (JSON, 16-bit, 8-bit and R+B PNGs, `meta.json`), so a
 ground export lines up cell for cell with a regular one.
 
@@ -361,8 +362,8 @@ ground export lines up cell for cell with a regular one.
    `terrain_`) or `--terrain --water` (water surface, prefixed
    `terrain_water_`).
 
-A Black Coast ground export at 1 m takes about 11 minutes — no collision
-settle is needed, since mesh collision is ignored anyway.
+A ground export takes about as long as a regular one (Black Coast at 1 m:
+~11 minutes).
 
 Water is your choice (`terrain_water` in `CONFIG`, recorded in `meta.json`):
 
@@ -380,9 +381,17 @@ Some maps keep the ocean in a weather layer (Black Coast:
 skip; in the water-surface variant, weather/lighting layers named
 `*ocean*`/`*water*` are attached too.
 
-* Where the minimap square has no Landscape (surround terrain built from
-  meshes), cells are hole-filled like any empty region — thin gaps from
-  neighbors, large areas with the minimum.
+* Many maps build their out-of-play mountains from meshes instead of
+  Landscape, so those count as terrain too (`CONFIG`):
+  `terrain_ground_mesh_keywords` — surround mountains, background terrain,
+  surround cliffs — behave exactly like Landscape (a mountain standing on the
+  landscape edge keeps its shape); `terrain_baked_landscape_keywords` — mesh
+  copies of the Landscape such as Chora's `SM_LandscapeStreamingProxy_0_LOD1`,
+  which carries Chora's whole surroundings — fill in only where no real
+  Landscape lies below. `meta.json` counts both
+  (`terrain_ground_mesh_cells`, `terrain_baked_landscape_cells`).
+* Where the minimap square has no terrain at all, cells are hole-filled like
+  any empty region — thin gaps from neighbors, large areas with the minimum.
 * Heights are normalized to that export's own minimum; compare against a
   surface export via `world_z = value + z_offset_m`.
 

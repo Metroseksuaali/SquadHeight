@@ -357,6 +357,8 @@ def terrain_sample(surfaces, ignore=None, water="seabed"):
     tr.z_top, tr.z_bottom, tr.epsilon = 10000.0, -10000.0, 5.0
     tr.terrain_only, tr.terrain_max_hits, tr.terrain_mesh_skips = True, 64, 0
     tr.water_surface, tr.water_cells = water == "surface", 0
+    tr.ground_mesh_cells, tr.baked_landscape_cells = 0, 0
+    tr.terrain_mesh_hits = 0
 
     def fake_trace(x, y, z_start, ign=None):
         ign = tr.ignore if ign is None else ign
@@ -414,6 +416,9 @@ class _Smc(unreal_stub.StaticMeshComponent):
     def __init__(self, path):
         self.static_mesh = _Mesh(path)
 
+    def get_class(self):
+        return _Named("StaticMeshComponent")
+
 
 ocean = _Named("BP_Ocean_Squad_C")
 river = _Named("StaticMeshActor")
@@ -437,6 +442,31 @@ check("terrain water surface: land above the water line wins", z == 800.0, str(z
       _Smc("/Game/Environments/Industrial/WaterTower.WaterTower")),
      (100.0, land, None)], water="surface")
 check("terrain water surface: water tower is not water", z == 100.0, str(z))
+
+# Terrain meshes: surround mountains count as ground, baked landscape copies
+# only fill in where no Landscape lies below.
+mtn = _Named("StaticMeshActor")
+mtn_mesh = _Smc("/Game/Environments/SurroundMountains/Mountains_goro/EdgeMountain1/FixedMesh.FixedMesh")
+baked = _Named("StaticMeshActor")
+baked_mesh = _Smc("/Game/Maps/Chora/Terrain/SM_LandscapeStreamingProxy_0_LOD1.SM_LandscapeStreamingProxy_0_LOD1")
+(z, _, _), tr = terrain_sample([(900.0, mtn, mtn_mesh), (400.0, land, None)])
+check("terrain mesh: surround mountain on landscape keeps its top", z == 900.0, str(z))
+check("terrain mesh: ground mesh counted", tr.ground_mesh_cells == 1)
+(z, _, _), tr = terrain_sample([(620.0, baked, baked_mesh), (600.0, land, None)])
+check("terrain mesh: real landscape beats baked copy", z == 600.0, str(z))
+(z, _, _), tr = terrain_sample([(1500.0, house, None), (1400.0, baked, baked_mesh)])
+check("terrain mesh: baked copy fills where no landscape", z == 1400.0, str(z))
+check("terrain mesh: baked counted", tr.baked_landscape_cells == 1)
+(z, _, _), _ = terrain_sample(
+    [(50.0, _Named("StaticMeshActor"),
+      _Smc("/Game/Maps/Anvil/Surround_Meshes/SM_AlBasrah_SurroundMesh.SM_AlBasrah_SurroundMesh")),
+     (10.0, land, None)])
+check("terrain mesh: exclude keywords still win", z == 10.0, str(z))
+(z, _, _), _ = terrain_sample(
+    [(700.0, _Named("StaticMeshActor"),
+      _Smc("/Game/Environments/MiddleEast/Landscape/Rocks/Large_Boulder_01/Large_Boulder_01.Large_Boulder_01")),
+     (10.0, land, None)])
+check("terrain mesh: rocks are not terrain", z == 10.0, str(z))
 eh._parse_hit = _orig_parse_hit
 
 # ---- batch_export: ocean weather layers kept only for water-surface terrain --
