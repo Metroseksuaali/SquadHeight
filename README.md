@@ -337,7 +337,10 @@ commandlets).
 For 3D modelling, where buildings and trees are added on top, you can export
 the bare ground instead of the true surface. It records the terrain only —
 the Landscape heightfield plus the meshes maps use as terrain (see below) —
-while buildings, bridges, walls, rocks and props are all ignored. Everything
+while buildings, bridges, walls, rocks and props are all ignored. That
+includes bridges and roads built as landscape splines: those meshes belong to
+the Landscape actor itself, so the scan looks through them to the heightfield
+below (`stats.terrain_landscape_spline_hits_skipped` in `meta.json`). Everything
 else stays identical: the SquadCalc bounds, grid, orientation
 and all output files (JSON, 16-bit, 8-bit and R+B PNGs, `meta.json`), so a
 ground export lines up cell for cell with a regular one.

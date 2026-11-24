@@ -558,6 +558,7 @@ def _settle_async_collision(world, tracer, n_cols, n_rows, step,
     tracer.mesh_counts = {}
     tracer.foliage_skips = 0
     tracer.terrain_mesh_hits = tracer.terrain_mesh_skips = 0
+    tracer.landscape_spline_skips = 0
     tracer.water_cells = tracer.ground_mesh_cells = 0
     tracer.baked_landscape_cells = 0
     return rounds, n
@@ -597,6 +598,21 @@ def _is_landscape_ground(actor, component):
     ):
         return False
     return True
+
+
+def _is_landscape_owned_mesh(actor, component):
+    """
+    True for a static mesh that a LandscapeProxy owns but that is not the
+    heightfield: landscape-spline meshes (SplineMeshComponent /
+    ControlPointMeshComponent - roads, rail lines and their BRIDGES) and
+    grass instances. _is_landscape_ground counts the spline meshes as ground,
+    which is what the surface modes want (a bridge deck is the top surface);
+    terrain_only must look through them or every spline bridge shows up in
+    a ground export (issue #11: Gorodok, Narva, Al Basrah).
+    """
+    return (actor is not None
+            and isinstance(actor, _landscape_class())
+            and isinstance(component, unreal.StaticMeshComponent))
 
 
 # Per-run cache: does this actor own any StaticMeshComponent? Used to tell
@@ -728,6 +744,7 @@ class _Tracer(object):
         self.foliage_skips = 0
         self.overhang_drops = 0
         self.terrain_mesh_skips = 0
+        self.landscape_spline_skips = 0
         self.water_cells = 0
         self.ground_mesh_cells = 0
         self.baked_landscape_cells = 0
@@ -795,6 +812,20 @@ class _Tracer(object):
             location, _normal, actor, component = _parse_hit(hit)
             if location is None:
                 break
+            if _is_landscape_owned_mesh(actor, component):
+                # Spline bridge/road or grass: the actor is the Landscape
+                # itself, so it can't go on the ignore list - step below the
+                # hit (complex traces are single-sided, so a restart inside
+                # the deck passes straight through it).
+                self.terrain_mesh_hits += 1
+                if isinstance(component, unreal.InstancedStaticMeshComponent):
+                    self.terrain_mesh_skips += 1
+                else:
+                    self.landscape_spline_skips += 1
+                z_start = location.z - self.epsilon
+                if z_start <= self.z_bottom:
+                    break
+                continue
             if _is_landscape_ground(actor, component):
                 return location.z, location.z, False
             self.terrain_mesh_hits += 1
@@ -1338,6 +1369,7 @@ def run_export(output_dir=None, map_name=None, overrides=None,
             "foliage_hits_skipped": tracer.foliage_skips,
             "overhang_drops": tracer.overhang_drops,
             "terrain_mesh_hits_skipped": tracer.terrain_mesh_skips,
+            "terrain_landscape_spline_hits_skipped": tracer.landscape_spline_skips,
             "terrain_water_cells": tracer.water_cells,
             "terrain_ground_mesh_cells": tracer.ground_mesh_cells,
             "terrain_baked_landscape_cells": tracer.baked_landscape_cells,
