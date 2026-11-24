@@ -335,7 +335,11 @@ class _Landscape(object):
     pass
 
 
-class _Ism(object):
+class _Ism(unreal_stub.StaticMeshComponent):  # as in UE: ISM is an SMC
+    pass
+
+
+class _SplineMesh(unreal_stub.StaticMeshComponent):  # landscape-spline mesh
     pass
 
 
@@ -356,6 +360,7 @@ def terrain_sample(surfaces, ignore=None, water="seabed"):
     tr.ignore = ignore if ignore is not None else []
     tr.z_top, tr.z_bottom, tr.epsilon = 10000.0, -10000.0, 5.0
     tr.terrain_only, tr.terrain_max_hits, tr.terrain_mesh_skips = True, 64, 0
+    tr.landscape_spline_skips = 0
     tr.water_surface, tr.water_cells = water == "surface", 0
     tr.ground_mesh_cells, tr.baked_landscape_cells = 0, 0
     tr.terrain_mesh_hits = 0
@@ -380,6 +385,13 @@ check("terrain_only: one skip per actor", tr.terrain_mesh_skips == 2,
       str(tr.terrain_mesh_skips))
 (z, _, _), _ = terrain_sample([(520.0, land, _Ism()), (500.0, land, None)])
 check("terrain_only: landscape grass stepped past", z == 500.0, str(z))
+# Issue #11: spline bridges are meshes OWNED by the Landscape actor.
+(z, _, _), tr = terrain_sample([(1500.0, land, _SplineMesh()), (300.0, land, None)])
+check("terrain_only: landscape-spline bridge looked through", z == 300.0, str(z))
+check("terrain_only: spline skip counted", tr.landscape_spline_skips == 1,
+      str(tr.landscape_spline_skips))
+(z, _, _), _ = terrain_sample([(1500.0, land, _SplineMesh())])
+check("terrain_only: spline bridge alone -> hole", z is None, str(z))
 (z, lz, _), _ = terrain_sample([(800.0, house, None)])
 check("terrain_only: no landscape -> hole", z is None and lz is None)
 shared_ignore = []

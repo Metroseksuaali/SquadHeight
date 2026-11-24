@@ -28,7 +28,11 @@ what a working session needs that the README doesn't.
   Proxy_0_LOD1` (11M of its cells) and many maps use `/SurroundMountains/`
   meshes — a landscape-only export lost them (sh4rkman's first report).
   `terrain_ground_mesh_keywords` = ground (topmost wins),
-  `terrain_baked_landscape_keywords` = only where no Landscape is below. `run_terrain_export.bat` / `SQUADHEIGHT_TERRAIN_ONLY=1`;
+  `terrain_baked_landscape_keywords` = only where no Landscape is below.
+  Landscape-spline meshes (`SplineMeshComponent`/`ControlPointMeshComponent`,
+  owned by the LandscapeProxy: Gorodok's rail bridges, Narva/Basrah bridges,
+  issue #11) are NOT heightfield — terrain mode steps through them
+  (`_is_landscape_owned_mesh`); surface modes still count them as ground. `run_terrain_export.bat` / `SQUADHEIGHT_TERRAIN_ONLY=1`;
   `build_release_zips.py --terrain`. Separate root so resume markers and
   `scaling.json` never mix with surface exports. Still runs the collision
   settle (gotcha 9 hits terrain meshes too: without it Chora's baked mesh got
